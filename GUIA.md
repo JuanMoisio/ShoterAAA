@@ -183,8 +183,15 @@ Para compartir el juego hay que generar una **versión empaquetada**: una carpet
 
 3. Esperá a que termine. Puede tardar bastante, porque compila y empaqueta todo el juego.
 4. Revisá los resultados: **`Build\Windows\`** (la carpeta jugable) y **`Build\ShoterAAA_Windows.zip`** (el archivo para compartir).
-5. Subí el ZIP a **Google Drive**, **MEGA** o **WeTransfer** y mandá el enlace a tus amigos.
-6. Tus amigos descargan el ZIP, hacen clic derecho → **Extraer todo** y abren **ShoterAAA.exe** (o el archivo **.bat** si juegan sin Steam).
+5. Publicalo en GitHub como una **Release** nueva (cambiá el número de versión cada vez, por ejemplo `v0.1.1`):
+
+   ```
+   gh release create v0.1.1 Build\ShoterAAA_Windows.zip --title "ShoterAAA v0.1.1" --notes "Qué cambió en esta versión"
+   ```
+
+6. Pasales a tus amigos este link, que siempre apunta a la última versión: **https://github.com/JuanMoisio/ShoterAAA/releases/latest**. Ahí bajan el ZIP, hacen clic derecho → **Extraer todo** y abren **ShoterAAA.exe** (o el archivo **.bat** si juegan sin Steam).
+
+   También podés subir el ZIP a **Google Drive**, **MEGA** o **WeTransfer** si preferís.
 
 > **Regla de oro:** todos tienen que tener **la misma versión**. Cada vez que cambies algo del juego, volvé a generar el ZIP y reenviarlo. Si no coinciden, aparece el mensaje "Tu versión del juego es distinta a la del host" (ver sección 7).
 
@@ -255,6 +262,22 @@ Dentro de `Source\ShoterAAA\`:
 - `Core\`: tipos y datos compartidos.
 
 **Flujo típico:** cambiás código → `Compile.ps1` → probás en el editor (o con `TestMultiplayer.ps1`) → `Package.ps1` → subís el ZIP.
+
+### 6.5 Versiones con git y GitHub
+
+El proyecto está guardado con **git** (un programa que guarda el historial de cambios) y subido a **GitHub**: **https://github.com/JuanMoisio/ShoterAAA** (público).
+
+- Cada vez que algo quede funcionando, guardá una versión y subila:
+
+  ```
+  git add -A
+  git commit -m "Qué cambié"
+  git push
+  ```
+
+- Los archivos grandes de Unreal (`.uasset`, `.umap`, `.wav`) viajan con **Git LFS**, que ya está configurado.
+- El maniquí y sus animaciones son contenido de las plantillas de Epic y **no se suben** al repo. Si clonás el proyecto en otra PC, instalá Unreal Engine 5.8 y corré `Tools\Setup\CopyTemplateContent.ps1` antes de compilar.
+- El juego empaquetado (`Build\`) tampoco va al repo: se publica en **Releases** (sección 5).
 
 ## 7. Problemas comunes y soluciones
 
