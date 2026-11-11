@@ -1,0 +1,34 @@
+# Unreal Engine: generated or machine-specific folders
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+
+# Packaged game (shared through GitHub Releases, not the repo)
+Build/
+
+# Epic template content (mannequin + rifle anims): restored by Tools/Setup/CopyTemplateContent.ps1
+Content/Characters/
+Content/Variant_Shooter/
+
+# IDE files
+.vs/
+.vscode/
+.idea/
+*.sln
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+*.code-workspace
+
+# Python caches
+__pycache__/
+*.pyc
+
+# OS
+Thumbs.db
+.DS_Store
