@@ -6,8 +6,9 @@ DerivedDataCache/
 Plugins/*/Binaries/
 Plugins/*/Intermediate/
 
-# Packaged game (shared through GitHub Releases, not the repo)
-Build/
+# Packaged game (shared through GitHub Releases, not the repo).
+# Root only: a bare "Build/" also ignored Tools/Build/, where the build scripts live.
+/Build/
 
 # Epic template content (mannequin + rifle anims): restored by Tools/Setup/CopyTemplateContent.ps1
 Content/Characters/
