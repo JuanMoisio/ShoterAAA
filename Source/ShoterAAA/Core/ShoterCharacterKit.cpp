@@ -227,12 +227,12 @@ void ShoterCharacterKit::MakeArmorSlotMaterials(UObject* Outer, USkinnedMeshComp
 namespace
 {
 	using EM = EShoterKitMat;
-	constexpr EShoterShape Cube = EShoterShape::Cube;
-	constexpr EShoterShape Sphere = EShoterShape::Sphere;
-	constexpr EShoterShape Cyl = EShoterShape::Cylinder;
-	constexpr EShoterShape Cone = EShoterShape::Cone;
-	const FName None = NAME_None;
-	const FRotator R0 = FRotator::ZeroRotator;
+	constexpr EShoterShape KitCube = EShoterShape::Cube;
+	constexpr EShoterShape KitSphere = EShoterShape::Sphere;
+	constexpr EShoterShape KitCyl = EShoterShape::Cylinder;
+	constexpr EShoterShape KitCone = EShoterShape::Cone;
+	const FName KitNone = NAME_None;
+	const FRotator KitR0 = FRotator::ZeroRotator;
 }
 
 // Columns: shape, bone, end bone, T, offset, size, rotation (pitch, yaw, roll), material, mirror.
@@ -241,42 +241,42 @@ TConstArrayView<FShoterKitPiece> ShoterCharacterKit::GetTrooperKit()
 	static const FShoterKitPiece Pieces[] =
 	{
 		// Helmet: shell, glowing visor band, crest, cheek guards, chin.
-		{ Sphere, "head", None, 0.f, FVector(0.5f, 0.f, 7.5f),		FVector(24.f, 21.f, 25.f),	R0,							EM::Armor, false },
-		{ Cube,   "head", None, 0.f, FVector(10.8f, 0.f, 8.f),		FVector(4.f, 18.f, 6.f),	R0,							EM::Glow,  false },
-		{ Cube,   "head", None, 0.f, FVector(10.f, 0.f, 3.5f),		FVector(5.f, 19.f, 3.f),	R0,							EM::Trim,  false },
-		{ Cube,   "head", None, 0.f, FVector(-0.5f, 0.f, 18.f),		FVector(16.f, 3.5f, 5.f),	FRotator(0.f, 0.f, 0.f),	EM::Trim,  false },
-		{ Cube,   "head", None, 0.f, FVector(3.f, 8.8f, 4.f),		FVector(10.f, 3.f, 10.f),	R0,							EM::Armor, true },
-		{ Cube,   "head", None, 0.f, FVector(8.f, 0.f, -1.5f),		FVector(7.f, 11.f, 5.f),	R0,							EM::Trim,  false },
-		{ Cyl,    "head", None, 0.f, FVector(-7.f, 8.f, 12.f),		FVector(1.2f, 1.2f, 14.f),	FRotator(0.f, 0.f, 12.f),	EM::Trim,  false },
+		{ KitSphere, "head", KitNone, 0.f, FVector(0.5f, 0.f, 7.5f),		FVector(24.f, 21.f, 25.f),	KitR0,							EM::Armor, false },
+		{ KitCube,   "head", KitNone, 0.f, FVector(10.8f, 0.f, 8.f),		FVector(4.f, 18.f, 6.f),	KitR0,							EM::Glow,  false },
+		{ KitCube,   "head", KitNone, 0.f, FVector(10.f, 0.f, 3.5f),		FVector(5.f, 19.f, 3.f),	KitR0,							EM::Trim,  false },
+		{ KitCube,   "head", KitNone, 0.f, FVector(-0.5f, 0.f, 18.f),		FVector(16.f, 3.5f, 5.f),	FRotator(0.f, 0.f, 0.f),	EM::Trim,  false },
+		{ KitCube,   "head", KitNone, 0.f, FVector(3.f, 8.8f, 4.f),		FVector(10.f, 3.f, 10.f),	KitR0,							EM::Armor, true },
+		{ KitCube,   "head", KitNone, 0.f, FVector(8.f, 0.f, -1.5f),		FVector(7.f, 11.f, 5.f),	KitR0,							EM::Trim,  false },
+		{ KitCyl,    "head", KitNone, 0.f, FVector(-7.f, 8.f, 12.f),		FVector(1.2f, 1.2f, 14.f),	FRotator(0.f, 0.f, 12.f),	EM::Trim,  false },
 		// Chest: plate, belly plate, light strip, accent chevrons.
-		{ Cube,   "spine_04", None, 0.f, FVector(10.5f, 0.f, 7.f),	FVector(5.f, 25.f, 14.f),	R0,							EM::Armor, false },
-		{ Cube,   "spine_04", None, 0.f, FVector(8.5f, 0.f, 18.f),	FVector(4.f, 28.f, 7.f),	FRotator(-28.f, 0.f, 0.f),	EM::Armor, false },
-		{ Cube,   "spine_04", None, 0.f, FVector(9.f, 0.f, -6.f),	FVector(3.5f, 14.f, 7.f),	FRotator(12.f, 0.f, 0.f),	EM::Trim,  false },
-		{ Cube,   "spine_04", None, 0.f, FVector(13.2f, 0.f, 13.5f),	FVector(1.f, 20.f, 1.2f),	R0,							EM::Glow,  false },
-		{ Cube,   "spine_04", None, 0.f, FVector(13.2f, 8.5f, 4.f),	FVector(1.2f, 5.f, 13.f),	FRotator(0.f, 0.f, 18.f),	EM::Accent, true },
+		{ KitCube,   "spine_04", KitNone, 0.f, FVector(10.5f, 0.f, 7.f),	FVector(5.f, 25.f, 14.f),	KitR0,							EM::Armor, false },
+		{ KitCube,   "spine_04", KitNone, 0.f, FVector(8.5f, 0.f, 18.f),	FVector(4.f, 28.f, 7.f),	FRotator(-28.f, 0.f, 0.f),	EM::Armor, false },
+		{ KitCube,   "spine_04", KitNone, 0.f, FVector(9.f, 0.f, -6.f),	FVector(3.5f, 14.f, 7.f),	FRotator(12.f, 0.f, 0.f),	EM::Trim,  false },
+		{ KitCube,   "spine_04", KitNone, 0.f, FVector(13.2f, 0.f, 13.5f),	FVector(1.f, 20.f, 1.2f),	KitR0,							EM::Glow,  false },
+		{ KitCube,   "spine_04", KitNone, 0.f, FVector(13.2f, 8.5f, 4.f),	FVector(1.2f, 5.f, 13.f),	FRotator(0.f, 0.f, 18.f),	EM::Accent, true },
 		// Back unit with exhausts and a light strip.
-		{ Cube,   "spine_04", None, 0.f, FVector(-12.f, 0.f, 9.f),	FVector(10.f, 22.f, 26.f),	R0,							EM::Armor, false },
-		{ Cyl,    "spine_04", None, 0.f, FVector(-14.f, 6.5f, 20.f),FVector(5.f, 5.f, 16.f),	FRotator(12.f, 0.f, 0.f),	EM::Trim,  true },
-		{ Cube,   "spine_04", None, 0.f, FVector(-17.4f, 0.f, 8.f),	FVector(1.f, 4.5f, 22.f),	R0,							EM::Glow,  false },
+		{ KitCube,   "spine_04", KitNone, 0.f, FVector(-12.f, 0.f, 9.f),	FVector(10.f, 22.f, 26.f),	KitR0,							EM::Armor, false },
+		{ KitCyl,    "spine_04", KitNone, 0.f, FVector(-14.f, 6.5f, 20.f),FVector(5.f, 5.f, 16.f),	FRotator(12.f, 0.f, 0.f),	EM::Trim,  true },
+		{ KitCube,   "spine_04", KitNone, 0.f, FVector(-17.4f, 0.f, 8.f),	FVector(1.f, 4.5f, 22.f),	KitR0,							EM::Glow,  false },
 		// Shoulders.
-		{ Cube,   "upperarm_r", None, 0.f, FVector(0.f, 4.5f, 8.f),	FVector(15.f, 13.f, 3.f),	FRotator(0.f, 0.f, 30.f),	EM::Armor, true },
-		{ Cube,   "upperarm_r", None, 0.f, FVector(0.f, 8.5f, 4.5f),FVector(13.f, 7.f, 2.5f),	FRotator(0.f, 0.f, 52.f),	EM::Armor, true },
-		{ Cube,   "upperarm_r", None, 0.f, FVector(0.f, 9.8f, 6.f),	FVector(12.f, 2.f, 3.f),	FRotator(0.f, 0.f, 52.f),	EM::Accent, true },
+		{ KitCube,   "upperarm_r", KitNone, 0.f, FVector(0.f, 4.5f, 8.f),	FVector(15.f, 13.f, 3.f),	FRotator(0.f, 0.f, 30.f),	EM::Armor, true },
+		{ KitCube,   "upperarm_r", KitNone, 0.f, FVector(0.f, 8.5f, 4.5f),FVector(13.f, 7.f, 2.5f),	FRotator(0.f, 0.f, 52.f),	EM::Armor, true },
+		{ KitCube,   "upperarm_r", KitNone, 0.f, FVector(0.f, 9.8f, 6.f),	FVector(12.f, 2.f, 3.f),	FRotator(0.f, 0.f, 52.f),	EM::Accent, true },
 		// Forearm guards with an accent ring.
-		{ Cyl,    "lowerarm_r", "hand_r", 0.5f, FVector(0.f),		FVector(10.5f, 10.5f, 17.f),R0,							EM::Armor, true },
-		{ Cyl,    "lowerarm_r", "hand_r", 0.2f, FVector(0.f),		FVector(11.2f, 11.2f, 1.6f),R0,							EM::Accent, true },
+		{ KitCyl,    "lowerarm_r", "hand_r", 0.5f, FVector(0.f),		FVector(10.5f, 10.5f, 17.f),KitR0,							EM::Armor, true },
+		{ KitCyl,    "lowerarm_r", "hand_r", 0.2f, FVector(0.f),		FVector(11.2f, 11.2f, 1.6f),KitR0,							EM::Accent, true },
 		// Belt.
-		{ Cube,   "pelvis", None, 0.f, FVector(10.f, 0.f, 6.f),		FVector(4.f, 18.f, 7.f),	R0,							EM::Trim,  false },
-		{ Cube,   "pelvis", None, 0.f, FVector(12.2f, 0.f, 6.f),	FVector(0.8f, 6.f, 2.f),	R0,							EM::Glow,  false },
-		{ Cube,   "pelvis", None, 0.f, FVector(1.f, 15.f, 2.f),	FVector(6.f, 3.f, 7.f),	R0,							EM::Armor, true },
-		{ Cube,   "pelvis", None, 0.f, FVector(-9.f, 0.f, 5.f),		FVector(4.f, 18.f, 8.f),	R0,							EM::Trim,  false },
+		{ KitCube,   "pelvis", KitNone, 0.f, FVector(10.f, 0.f, 6.f),		FVector(4.f, 18.f, 7.f),	KitR0,							EM::Trim,  false },
+		{ KitCube,   "pelvis", KitNone, 0.f, FVector(12.2f, 0.f, 6.f),	FVector(0.8f, 6.f, 2.f),	KitR0,							EM::Glow,  false },
+		{ KitCube,   "pelvis", KitNone, 0.f, FVector(1.f, 15.f, 2.f),	FVector(6.f, 3.f, 7.f),	KitR0,							EM::Armor, true },
+		{ KitCube,   "pelvis", KitNone, 0.f, FVector(-9.f, 0.f, 5.f),		FVector(4.f, 18.f, 8.f),	KitR0,							EM::Trim,  false },
 		// Legs: thigh plate, knee pad, shin guard with accent strip.
-		{ Cube,   "thigh_r", "calf_r", 0.4f, FVector(8.3f, 2.5f, 0.f),	FVector(2.8f, 9.f, 22.f),FRotator(0.f, 12.f, 0.f),	EM::Armor, true },
-		{ Cube,   "thigh_r", "calf_r", 0.4f, FVector(1.f, 9.3f, 1.f),	FVector(12.f, 2.5f, 19.f),R0,						EM::Armor, true },
-		{ Cube,   "thigh_r", "calf_r", 0.4f, FVector(10.f, 2.8f, 0.f),	FVector(0.8f, 2.2f, 16.f),FRotator(0.f, 12.f, 0.f),	EM::Accent, true },
-		{ Cube,   "calf_r", None, 0.f, FVector(8.8f, 1.5f, 2.f),	FVector(4.f, 10.f, 6.f),	FRotator(-18.f, 0.f, 0.f),	EM::Trim,  true },
-		{ Cube,   "calf_r", "foot_r", 0.5f, FVector(6.5f, 0.f, 0.f),	FVector(4.5f, 10.f, 28.f),R0,						EM::Armor, true },
-		{ Cube,   "calf_r", "foot_r", 0.5f, FVector(9.f, 0.f, 0.f),	FVector(1.f, 2.5f, 22.f),	R0,							EM::Accent, true },
+		{ KitCube,   "thigh_r", "calf_r", 0.4f, FVector(8.3f, 2.5f, 0.f),	FVector(2.8f, 9.f, 22.f),FRotator(0.f, 12.f, 0.f),	EM::Armor, true },
+		{ KitCube,   "thigh_r", "calf_r", 0.4f, FVector(1.f, 9.3f, 1.f),	FVector(12.f, 2.5f, 19.f),KitR0,						EM::Armor, true },
+		{ KitCube,   "thigh_r", "calf_r", 0.4f, FVector(10.f, 2.8f, 0.f),	FVector(0.8f, 2.2f, 16.f),FRotator(0.f, 12.f, 0.f),	EM::Accent, true },
+		{ KitCube,   "calf_r", KitNone, 0.f, FVector(8.8f, 1.5f, 2.f),	FVector(4.f, 10.f, 6.f),	FRotator(-18.f, 0.f, 0.f),	EM::Trim,  true },
+		{ KitCube,   "calf_r", "foot_r", 0.5f, FVector(6.5f, 0.f, 0.f),	FVector(4.5f, 10.f, 28.f),KitR0,						EM::Armor, true },
+		{ KitCube,   "calf_r", "foot_r", 0.5f, FVector(9.f, 0.f, 0.f),	FVector(1.f, 2.5f, 22.f),	KitR0,							EM::Accent, true },
 	};
 	return Pieces;
 }
@@ -286,8 +286,8 @@ TConstArrayView<FShoterKitPiece> ShoterCharacterKit::GetTrooperArmKit()
 	static const FShoterKitPiece Pieces[] =
 	{
 		// Slim forearm guard hugging the arm, ending well before the wrist, with a thin accent ring (the arm bones are slimmed to 0.78).
-		{ Cyl,    "lowerarm_r", "hand_r", 0.30f, FVector(0.f),		FVector(9.2f, 9.2f, 10.f),	R0,							EM::Armor, true },
-		{ Cyl,    "lowerarm_r", "hand_r", 0.14f, FVector(0.f),		FVector(9.8f, 9.8f, 0.9f),	R0,							EM::Accent, true },
+		{ KitCyl,    "lowerarm_r", "hand_r", 0.30f, FVector(0.f),		FVector(9.2f, 9.2f, 10.f),	KitR0,							EM::Armor, true },
+		{ KitCyl,    "lowerarm_r", "hand_r", 0.14f, FVector(0.f),		FVector(9.8f, 9.8f, 0.9f),	KitR0,							EM::Accent, true },
 	};
 	return Pieces;
 }
@@ -298,23 +298,23 @@ TConstArrayView<FShoterKitPiece> ShoterCharacterKit::GetZombieKit(int32 TypeInde
 	// The brute swaps the thigh crack for a second broken plate and has bigger plates.
 	static const FShoterKitPiece Walker[] =
 	{
-		{ Cube,   "head", None, 0.f, FVector(11.f, 3.4f, 6.f),		FVector(3.5f, 3.8f, 2.2f),	FRotator(0.f, 0.f, 10.f),	EM::Glow,  true },
-		{ Sphere, "spine_04", None, 0.f, FVector(11.f, 0.f, 6.f),	FVector(7.f, 7.f, 7.f),		R0,							EM::Glow,  false },
-		{ Cube,   "upperarm_l", None, 0.f, FVector(0.f, -5.f, 7.5f),FVector(14.f, 11.f, 2.5f),	FRotator(0.f, 15.f, -32.f),	EM::Armor, false },
-		{ Cube,   "spine_04", None, 0.f, FVector(10.f, 6.f, 11.f),	FVector(3.f, 12.f, 13.f),	FRotator(0.f, 12.f, 10.f),	EM::Armor, false },
-		{ Cube,   "spine_04", None, 0.f, FVector(-10.4f, 0.f, 6.f),	FVector(0.8f, 1.8f, 30.f),	R0,							EM::Glow,  false },
-		{ Cube,   "lowerarm_l", "hand_l", 0.5f, FVector(3.2f, 0.f, 0.f), FVector(0.8f, 1.8f, 15.f), R0,						EM::Glow,  false },
-		{ Cube,   "thigh_r", "calf_r", 0.5f, FVector(8.f, 1.5f, 0.f), FVector(0.8f, 1.8f, 22.f),R0,							EM::Glow,  false },
+		{ KitCube,   "head", KitNone, 0.f, FVector(11.f, 3.4f, 6.f),		FVector(3.5f, 3.8f, 2.2f),	FRotator(0.f, 0.f, 10.f),	EM::Glow,  true },
+		{ KitSphere, "spine_04", KitNone, 0.f, FVector(11.f, 0.f, 6.f),	FVector(7.f, 7.f, 7.f),		KitR0,							EM::Glow,  false },
+		{ KitCube,   "upperarm_l", KitNone, 0.f, FVector(0.f, -5.f, 7.5f),FVector(14.f, 11.f, 2.5f),	FRotator(0.f, 15.f, -32.f),	EM::Armor, false },
+		{ KitCube,   "spine_04", KitNone, 0.f, FVector(10.f, 6.f, 11.f),	FVector(3.f, 12.f, 13.f),	FRotator(0.f, 12.f, 10.f),	EM::Armor, false },
+		{ KitCube,   "spine_04", KitNone, 0.f, FVector(-10.4f, 0.f, 6.f),	FVector(0.8f, 1.8f, 30.f),	KitR0,							EM::Glow,  false },
+		{ KitCube,   "lowerarm_l", "hand_l", 0.5f, FVector(3.2f, 0.f, 0.f), FVector(0.8f, 1.8f, 15.f), KitR0,						EM::Glow,  false },
+		{ KitCube,   "thigh_r", "calf_r", 0.5f, FVector(8.f, 1.5f, 0.f), FVector(0.8f, 1.8f, 22.f),KitR0,							EM::Glow,  false },
 	};
 	static const FShoterKitPiece Brute[] =
 	{
-		{ Cube,   "head", None, 0.f, FVector(11.f, 3.4f, 6.f),		FVector(3.5f, 3.8f, 2.2f),	FRotator(0.f, 0.f, 10.f),	EM::Glow,  true },
-		{ Sphere, "spine_04", None, 0.f, FVector(11.f, 0.f, 6.f),	FVector(9.f, 9.f, 9.f),		R0,							EM::Glow,  false },
-		{ Cube,   "upperarm_l", None, 0.f, FVector(0.f, -5.f, 8.f),	FVector(18.f, 14.f, 3.f),	FRotator(0.f, 15.f, -32.f),	EM::Armor, false },
-		{ Cube,   "spine_04", None, 0.f, FVector(10.f, 6.f, 11.f),	FVector(3.f, 14.f, 15.f),	FRotator(0.f, 12.f, 10.f),	EM::Armor, false },
-		{ Cube,   "spine_04", None, 0.f, FVector(-10.4f, 0.f, 6.f),	FVector(0.8f, 2.2f, 30.f),	R0,							EM::Glow,  false },
-		{ Cube,   "lowerarm_l", "hand_l", 0.5f, FVector(3.2f, 0.f, 0.f), FVector(0.8f, 2.2f, 15.f), R0,						EM::Glow,  false },
-		{ Cube,   "upperarm_r", None, 0.f, FVector(0.f, 4.f, 7.f),	FVector(13.f, 9.f, 3.f),	FRotator(0.f, -10.f, 35.f),	EM::Trim,  false },
+		{ KitCube,   "head", KitNone, 0.f, FVector(11.f, 3.4f, 6.f),		FVector(3.5f, 3.8f, 2.2f),	FRotator(0.f, 0.f, 10.f),	EM::Glow,  true },
+		{ KitSphere, "spine_04", KitNone, 0.f, FVector(11.f, 0.f, 6.f),	FVector(9.f, 9.f, 9.f),		KitR0,							EM::Glow,  false },
+		{ KitCube,   "upperarm_l", KitNone, 0.f, FVector(0.f, -5.f, 8.f),	FVector(18.f, 14.f, 3.f),	FRotator(0.f, 15.f, -32.f),	EM::Armor, false },
+		{ KitCube,   "spine_04", KitNone, 0.f, FVector(10.f, 6.f, 11.f),	FVector(3.f, 14.f, 15.f),	FRotator(0.f, 12.f, 10.f),	EM::Armor, false },
+		{ KitCube,   "spine_04", KitNone, 0.f, FVector(-10.4f, 0.f, 6.f),	FVector(0.8f, 2.2f, 30.f),	KitR0,							EM::Glow,  false },
+		{ KitCube,   "lowerarm_l", "hand_l", 0.5f, FVector(3.2f, 0.f, 0.f), FVector(0.8f, 2.2f, 15.f), KitR0,						EM::Glow,  false },
+		{ KitCube,   "upperarm_r", KitNone, 0.f, FVector(0.f, 4.f, 7.f),	FVector(13.f, 9.f, 3.f),	FRotator(0.f, -10.f, 35.f),	EM::Trim,  false },
 	};
 	return TypeIndex == 2 ? TConstArrayView<FShoterKitPiece>(Brute) : TConstArrayView<FShoterKitPiece>(Walker);
 }
