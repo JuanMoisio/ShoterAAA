@@ -91,6 +91,31 @@ void AShoterProjectile::BeginPlay()
 	}
 	Light->SetLightColor(Color);
 
+	// Glow tail (cone with its tip pointing backwards) and a soft halo: cosmetic, no collision, no gameplay change.
+	UShoterAssets* Assets = UShoterAssets::Get(this);
+	if (Assets && Movement->bRotationFollowsVelocity && GetNetMode() != NM_DedicatedServer)
+	{
+		const float Length = VisualDiameter * 6.f;
+		Trail = NewObject<UStaticMeshComponent>(this, TEXT("Trail"));
+		Trail->SetStaticMesh(Assets->GetShape(EShoterShape::Cone));
+		Trail->SetupAttachment(Collision);
+		Trail->SetRelativeLocationAndRotation(FVector(-(Length * 0.5f + VisualDiameter * 0.25f), 0.f, 0.f), FRotator(90.f, 0.f, 0.f));
+		Trail->SetRelativeScale3D(FVector(VisualDiameter * 0.9f / 100.f, VisualDiameter * 0.9f / 100.f, Length / 100.f));
+		Trail->SetMaterial(0, Assets->MakeGlowMaterial(this, Color, 7.f));
+		Trail->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Trail->SetCastShadow(false);
+		Trail->RegisterComponent();
+
+		Halo = NewObject<UStaticMeshComponent>(this, TEXT("Halo"));
+		Halo->SetStaticMesh(Assets->GetShape(EShoterShape::Sphere));
+		Halo->SetupAttachment(Collision);
+		Halo->SetRelativeScale3D(FVector(VisualDiameter * 2.1f / 100.f));
+		Halo->SetMaterial(0, Assets->MakeGlowMaterial(this, Color, 2.5f));
+		Halo->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Halo->SetCastShadow(false);
+		Halo->RegisterComponent();
+	}
+
 	if (HasAuthority() && FuseTime > 0.f)
 	{
 		GetWorldTimerManager().SetTimer(TimerHandle_Fuse, this, &AShoterProjectile::OnFuseExpired, FuseTime, false);
@@ -164,6 +189,8 @@ void AShoterProjectile::Explode(const FHitResult& Impact)
 	Collision->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Visual->SetHiddenInGame(true);
 	Light->SetVisibility(false);
+	if (Trail) { Trail->SetHiddenInGame(true); }
+	if (Halo) { Halo->SetHiddenInGame(true); }
 	SetLifeSpan(1.f);
 }
 
@@ -173,6 +200,8 @@ void AShoterProjectile::OnRep_Exploded()
 	{
 		Visual->SetHiddenInGame(true);
 		Light->SetVisibility(false);
+		if (Trail) { Trail->SetHiddenInGame(true); }
+		if (Halo) { Halo->SetHiddenInGame(true); }
 		PlayExplosionEffects();
 	}
 }

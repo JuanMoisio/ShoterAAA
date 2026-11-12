@@ -4,6 +4,8 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "Engine/NetSerialization.h"
+#include "Core/ShoterCharacterKit.h"
+#include "Core/ShoterArmRig.h"
 #include "ShoterCharacter.generated.h"
 
 class UCameraComponent;
@@ -14,6 +16,8 @@ class AShoterPlayerState;
 class UInputComponent;
 class UMaterialInstanceDynamic;
 class UStaticMeshComponent;
+class UPoseableMeshComponent;
+struct FShoterReloadFrame;
 struct FInputActionValue;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FShoterCharacterDiedSignature, class AShoterCharacter* /*Character*/);
@@ -130,6 +134,9 @@ public:
 	/** Local: camera recoil requested by the weapon (degrees), applied smoothly over a few frames. */
 	void AddRecoil(float PitchDegrees, float YawDegrees);
 
+	/** Horizontal FOV (at 16:9) of the first-person viewmodel. */
+	static constexpr float ViewmodelFOV = 85.f;
+
 	// --- Interaction (local) ---
 	AActor* GetFocusedInteractable() const { return FocusedInteractable.Get(); }
 	FText GetInteractionPrompt() const;
@@ -143,6 +150,9 @@ public:
 
 	/** Re-applies the team color to the third-person body. */
 	void RefreshTeamColor();
+
+	/** Dev only (-ShoterShotTeams): forces the accent colour of a staged dummy. */
+	TOptional<FLinearColor> DebugAccentOverride;
 
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoter")
@@ -266,6 +276,12 @@ protected:
 	void SetCurrentWeapon(AShoterWeapon* NewWeapon, AShoterWeapon* LastWeapon);
 	void SetupBodyMesh();
 	void UpdateFirstPersonView(float DeltaSeconds);
+	/** First-person arms: built on first use (local player only, never on a dedicated server). */
+	void BuildViewArms();
+	void UpdateViewArms(const FVector& PivotLocation, const FRotator& PivotRotation, AShoterWeapon* Weapon, const FShoterReloadFrame& ReloadFrame);
+	void ApplyArmorLook(const TArray<TObjectPtr<UMaterialInstanceDynamic>>& SlotMaterials) const;
+	/** The third-person body pose is final: while the weapon reloads the left arm follows the reload choreography. */
+	void OnBodyBonesFinalized();
 	void UpdateInteractionFocus();
 	void UpdateRegeneration(float DeltaSeconds);
 	void UpdateFootsteps(float DeltaSeconds);
@@ -296,6 +312,15 @@ protected:
 	bool bSprintHeld = false;
 
 	FRotator PendingRecoil = FRotator::ZeroRotator;
+	/** Recoil already applied to the control rotation that is still waiting to be recovered. */
+	FRotator RecoilToRecover = FRotator::ZeroRotator;
+	float LastRecoilTime = -100.f;
+	/** Control rotation after our own recoil/recovery last tick, to detect the player's compensation. */
+	FRotator RecoilTrackedRotation = FRotator::ZeroRotator;
+	bool bRecoilTrackedValid = false;
+	void ResetRecoil();
+	/** 0..1 eased aim alpha used for view and sensitivity. */
+	float GetEasedAimAlpha() const;
 	FRotator LastControlRotation = FRotator::ZeroRotator;
 	FVector SwayOffset = FVector::ZeroVector;
 	FRotator SwayRotation = FRotator::ZeroRotator;
@@ -307,6 +332,45 @@ protected:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> BodyMaterial;
+
+	/** Dynamic instances of the mesh's own slot materials (armour palette). */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> BodySlotMaterials;
+
+	/** Additive team rim overlay of the skeletal body. */
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> RimOverlayMaterial;
+
+	/** First-person arms (poseable mannequin, posed by IK from the weapon grips), their armour and rigs. */
+	UPROPERTY(Transient)
+	TObjectPtr<UPoseableMeshComponent> ViewArms;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> ViewArmSlotMaterials;
+
+	UPROPERTY(Transient)
+	TArray<FShoterKitPart> ViewArmKit;
+
+	UPROPERTY(Transient)
+	FShoterKitMaterials ViewArmKitMaterials;
+
+	FShoterArmRig ViewRigRight;
+	FShoterArmRig ViewRigLeft;
+	FShoterArmRig BodyRigLeft;
+	TArray<FTransform> ViewArmPose;
+	TArray<FTransform> BodyPoseBackup;
+	FDelegateHandle BodyBonesFinalizedHandle;
+	bool bBuiltViewArms = false;
+
+	/** Armour kit attached to bones (cosmetic, built locally). */
+	UPROPERTY(Transient)
+	TArray<FShoterKitPart> KitParts;
+
+	UPROPERTY(Transient)
+	FShoterKitMaterials KitMaterials;
+
+	/** Team colour, or a per-player colour when there are no teams (free-for-all). */
+	FLinearColor GetAccentColor() const;
 
 	FTimerHandle TimerHandle_SpawnProtection;
 

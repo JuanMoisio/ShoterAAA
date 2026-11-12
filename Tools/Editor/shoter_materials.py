@@ -5,6 +5,8 @@ Materials (graphs are rebuilt from scratch on every run; parameter names are a c
   M_Shoter_Surface      opaque lit        BaseColor, EmissiveColor | Metallic, Roughness, EmissiveStrength
   M_Shoter_Glow         unlit additive    Color | Intensity
   M_Shoter_Character    opaque lit        BaseColor, TeamColor, EmissiveColor | Metallic, Roughness, RimStrength, EmissiveStrength
+  M_Shoter_Trooper      opaque lit        BaseTex, NormalTex, MRATex (assigned at runtime from the mannequin slot) | ArmorColor, PanelColor | Metallic, Roughness
+  M_Shoter_TeamRim      additive unlit    TeamColor | RimStrength   (overlay material of the skeletal body: team fresnel rim)
   M_Shoter_ImpactDecal  deferred decal    soft round burn mark
   M_Shoter_ScorchDecal  deferred decal    big irregular scorch mark
   M_Shoter_Floor        opaque lit        world-aligned panels + emissive grid lines
@@ -376,6 +378,62 @@ def build_character():
                    ("Metallic", "Roughness", "RimStrength", "EmissiveStrength"), ("BaseColor", "TeamColor", "EmissiveColor"))
 
 
+def build_trooper():
+    """Dark armour that keeps the mannequin's own panel detail: its diffuse is only a tonal mask, normal and MRA are used as they are."""
+    material, _ = _get_or_create_material("M_Shoter_Trooper")
+    _setup(material, usage=("bUsedWithSkeletalMesh", "bUsedWithMorphTargets"))
+    g = Graph(material)
+
+    def texture(name, default_path, normal=False):
+        node = g._new("MaterialExpressionTextureSampleParameter2D", ParameterName=name, Group="Shoter")
+        tex = unreal.load_asset(default_path)
+        if tex is not None:
+            C.set_prop(node, "Texture", tex)
+        if normal:
+            C.set_prop(node, "SamplerType", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL)
+        return node
+
+    base_tex = texture("BaseTex", "/Game/Characters/Mannequins/Textures/Manny/T_Manny_01_D")
+    normal_tex = texture("NormalTex", "/Game/Characters/Mannequins/Textures/Manny/T_Manny_01_BN", normal=True)
+    mra_tex = texture("MRATex", "/Game/Characters/Mannequins/Textures/Manny/T_Manny_01_MRA")
+    armor = g.vector("ArmorColor", (0.05, 0.055, 0.065))
+    panel = g.vector("PanelColor", (0.16, 0.17, 0.19))
+    metallic = g.scalar("Metallic", 0.95)
+    roughness_scale = g.scalar("RoughnessScale", 0.5)
+
+    tone = g.sat(g.mul(g.mask(base_tex, r=True), 1.3))
+    base_out = g.lerp(armor, panel, g.mul(tone, tone))
+    mra_r = g.mask(mra_tex, r=True)
+    mra_g = g.mask(mra_tex, g=True)
+    mra_b = g.mask(mra_tex, b=True)
+    # Near-full metal with a dark base colour: reflections of the bright neon environment are tinted dark instead of glossy silver.
+    metallic_out = g.sat(g.add(metallic, g.mul(mra_r, 0.05)))
+    roughness_out = g.sat(g.add(0.32, g.mul(mra_g, roughness_scale)))
+    g.output(base_out, "BASE_COLOR")
+    g.output(metallic_out, "METALLIC")
+    g.output(roughness_out, "ROUGHNESS")
+    g.output(mra_b, "AMBIENT_OCCLUSION")
+    g.output(normal_tex, "NORMAL")
+    return _finish(material, "M_Shoter_Trooper", g, ("Metallic", "RoughnessScale"), ("ArmorColor", "PanelColor"))
+
+
+def build_team_rim():
+    material, _ = _get_or_create_material("M_Shoter_TeamRim")
+    _setup(material, blend="BLEND_ADDITIVE", shading="MSM_UNLIT", two_sided=False,
+           usage=("bUsedWithSkeletalMesh", "bUsedWithMorphTargets"))
+    g = Graph(material)
+    team = g.vector("TeamColor", (0.10, 0.40, 1.0))
+    strength = g.scalar("RimStrength", 0.5)
+    far_boost = g.scalar("FarBoost", 7.0)
+    # Distance boost: the rim grows with pixel depth (1x within 12 m, up to 1 + FarBoost beyond ~34 m) so teams read from far away.
+    depth = g._new("MaterialExpressionPixelDepth")
+    far = g.sat(g.div(g.sub(depth, 1200.0), 2200.0))
+    boost = g.add(1.0, g.mul(far, far_boost))
+    rim = g.mul(g.mul(g.mul(g.fresnel(2.6, 0.0), team), strength), boost)
+    g.output(rim, "EMISSIVE_COLOR")
+    return _finish(material, "M_Shoter_TeamRim", g, ("RimStrength", "FarBoost"), ("TeamColor",))
+
+
 def _build_decal(name, radius, hardness, burn, roughness, ember, ember_strength, opacity_scale, wobble):
     material, _ = _get_or_create_material(name)
     _setup(material, domain="MD_DEFERRED_DECAL", blend="BLEND_TRANSLUCENT", shading="MSM_DEFAULT_LIT",
@@ -514,6 +572,8 @@ MATERIALS = [
     ("M_Shoter_Surface", build_surface),
     ("M_Shoter_Glow", build_glow),
     ("M_Shoter_Character", build_character),
+    ("M_Shoter_Trooper", build_trooper),
+    ("M_Shoter_TeamRim", build_team_rim),
     ("M_Shoter_ImpactDecal", build_impact_decal),
     ("M_Shoter_ScorchDecal", build_scorch_decal),
     ("M_Shoter_Floor", build_floor),

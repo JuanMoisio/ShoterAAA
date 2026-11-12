@@ -9,11 +9,13 @@
 #include "Game/ShoterGameMode.h"
 #include "Core/ShoterAssets.h"
 #include "Core/ShoterFX.h"
+#include "Core/ShoterFXPool.h"
 #include "Core/ShoterInteractable.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/PoseableMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -22,6 +24,7 @@
 #include "EnhancedInputComponent.h"
 #include "InputActionValue.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Engine/Texture.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 
@@ -56,7 +59,7 @@ AShoterCharacter::AShoterCharacter(const FObjectInitializer& ObjectInitializer)
 	// First-person rendering: weapons keep a fixed viewmodel FOV and never clip into walls.
 	FirstPersonCamera->bEnableFirstPersonFieldOfView = true;
 	FirstPersonCamera->bEnableFirstPersonScale = true;
-	FirstPersonCamera->FirstPersonFieldOfView = 85.f;
+	FirstPersonCamera->FirstPersonFieldOfView = ViewmodelFOV;
 	FirstPersonCamera->FirstPersonScale = 0.6f;
 
 	WeaponPivot = CreateDefaultSubobject<USceneComponent>(TEXT("WeaponPivot"));
@@ -137,6 +140,11 @@ void AShoterCharacter::BeginPlay()
 	RefreshTeamColor();
 	LastControlRotation = GetControlRotation();
 
+	if (GetNetMode() != NM_DedicatedServer && GetMesh()->GetSkeletalMeshAsset())
+	{
+		BodyBonesFinalizedHandle = GetMesh()->RegisterOnBoneTransformsFinalizedDelegate(FOnBoneTransformsFinalizedMultiCast::FDelegate::CreateUObject(this, &AShoterCharacter::OnBodyBonesFinalized));
+	}
+
 	if (HasAuthority())
 	{
 		bSpawnProtected = true;
@@ -149,6 +157,11 @@ void AShoterCharacter::BeginPlay()
 
 void AShoterCharacter::Destroyed()
 {
+	if (BodyBonesFinalizedHandle.IsValid() && GetMesh())
+	{
+		GetMesh()->UnregisterOnBoneTransformsFinalizedDelegate(BodyBonesFinalizedHandle);
+		BodyBonesFinalizedHandle.Reset();
+	}
 	if (AShoterPlayerState* OldState = BoundPlayerState.Get())
 	{
 		OldState->OnTeamChanged.Remove(TeamChangedHandle);
@@ -285,6 +298,52 @@ void AShoterCharacter::BuildPlaceholderBody()
 	}
 }
 
+void AShoterCharacter::ApplyArmorLook(const TArray<TObjectPtr<UMaterialInstanceDynamic>>& SlotMaterials) const
+{
+	for (int32 Index = 0; Index < SlotMaterials.Num(); ++Index)
+	{
+		if (UMaterialInstanceDynamic* SlotInstance = SlotMaterials[Index])
+		{
+			// Slot 0 is head + legs, slot 1 torso + arms: two close graphite tones.
+			const float Tone = Index == 0 ? 0.045f : 0.06f;
+			SlotInstance->SetVectorParameterValue(TEXT("ArmorColor"), FLinearColor(Tone, Tone * 1.05f, Tone * 1.2f));
+			SlotInstance->SetVectorParameterValue(TEXT("PanelColor"), FLinearColor(Tone * 3.f, Tone * 3.2f, Tone * 3.6f));
+		}
+	}
+}
+
+FLinearColor AShoterCharacter::GetAccentColor() const
+{
+	if (DebugAccentOverride.IsSet())
+	{
+		return DebugAccentOverride.GetValue();
+	}
+	const uint8 Team = GetTeam();
+	if (Team != ShoterTeam::None)
+	{
+		return ShoterTeam::GetColor(Team);
+	}
+
+	// No teams (free-for-all, co-op): a stable colour per player so everyone is told apart.
+	static const FLinearColor FfaColors[] =
+	{
+		FLinearColor(0.05f, 0.9f, 1.f),		// cyan
+		FLinearColor(1.f, 0.1f, 0.75f),		// magenta
+		FLinearColor(0.35f, 1.f, 0.15f),	// green
+		FLinearColor(1.f, 0.55f, 0.05f),	// orange
+		FLinearColor(1.f, 0.9f, 0.1f),		// yellow
+		FLinearColor(0.6f, 0.25f, 1.f),		// violet
+		FLinearColor(1.f, 0.15f, 0.08f),	// red
+		FLinearColor(0.05f, 0.55f, 1.f)		// blue
+	};
+	const AShoterPlayerState* State = GetShoterPlayerState();
+	if (!State)
+	{
+		return ShoterTeam::GetColor(Team);
+	}
+	return FfaColors[FMath::Abs(State->GetPlayerId()) % UE_ARRAY_COUNT(FfaColors)];
+}
+
 void AShoterCharacter::RefreshTeamColor()
 {
 	UShoterAssets* Assets = UShoterAssets::Get(this);
@@ -292,8 +351,55 @@ void AShoterCharacter::RefreshTeamColor()
 	{
 		return;
 	}
-	const FLinearColor TeamColor = ShoterTeam::GetColor(GetTeam());
+	const FLinearColor TeamColor = GetAccentColor();
 
+	USkeletalMeshComponent* Body = GetMesh();
+	if (Body && Body->GetSkeletalMeshAsset())
+	{
+		// "Neon trooper": the mesh's own materials (panel/normal detail kept) tinted to a dark armour palette, a team-coloured
+		// logo accent, a team rim overlay and the armour kit with its glowing visor.
+		ShoterCharacterKit::MakeArmorSlotMaterials(this, Body, BodySlotMaterials);
+		ApplyArmorLook(BodySlotMaterials);
+
+		if (!RimOverlayMaterial)
+		{
+			if (UMaterialInterface* RimMaterial = Assets->GetMaterial(TEXT("M_Shoter_TeamRim")))
+			{
+				RimOverlayMaterial = UMaterialInstanceDynamic::Create(RimMaterial, this);
+				Body->SetOverlayMaterial(RimOverlayMaterial);
+			}
+		}
+		if (RimOverlayMaterial)
+		{
+			RimOverlayMaterial->SetVectorParameterValue(TEXT("TeamColor"), TeamColor);
+			RimOverlayMaterial->SetScalarParameterValue(TEXT("RimStrength"), bSpawnProtected ? 3.f : 0.5f);
+		}
+
+		if (ViewArms)
+		{
+			ApplyArmorLook(ViewArmSlotMaterials);
+			FShoterKitPalette ArmPalette;
+			ArmPalette.AccentColor = TeamColor;
+			ArmPalette.GlowIntensity = 2.4f;
+			ArmPalette.AccentEmissive = 1.1f;
+			ShoterCharacterKit::UpdateMaterials(this, ArmPalette, ViewArmKitMaterials, ViewArmKit);
+		}
+
+		if (HasActorBegunPlay())
+		{
+			if (KitParts.Num() == 0)
+			{
+				ShoterCharacterKit::Build(this, Body, ShoterCharacterKit::GetTrooperKit(), true, KitParts);
+			}
+			FShoterKitPalette Palette;
+			Palette.AccentColor = TeamColor;
+			Palette.GlowIntensity = bSpawnProtected ? 6.f : 2.4f;
+			ShoterCharacterKit::UpdateMaterials(this, Palette, KitMaterials, KitParts);
+		}
+		return;
+	}
+
+	// Fallback (no skeletal mesh): one flat material on the primitive body.
 	if (!BodyMaterial)
 	{
 		if (UMaterialInterface* CharacterMaterial = Assets->GetMaterial(TEXT("M_Shoter_Character")))
@@ -319,14 +425,6 @@ void AShoterCharacter::RefreshTeamColor()
 	BodyMaterial->SetScalarParameterValue(TEXT("EmissiveStrength"), bSpawnProtected ? 3.f : 0.6f);
 	BodyMaterial->SetVectorParameterValue(TEXT("Color"), Armor + TeamColor * 0.3f);
 
-	USkeletalMeshComponent* Body = GetMesh();
-	if (Body && Body->GetSkeletalMeshAsset())
-	{
-		for (int32 Index = 0; Index < Body->GetNumMaterials(); ++Index)
-		{
-			Body->SetMaterial(Index, BodyMaterial);
-		}
-	}
 	for (UStaticMeshComponent* Part : PlaceholderParts)
 	{
 		if (!Part)
@@ -424,7 +522,7 @@ void AShoterCharacter::UpdateFirstPersonView(float DeltaSeconds)
 	const FRotator ControlRotation = GetControlRotation();
 	const FRotator LookDelta = (ControlRotation - LastControlRotation).GetNormalized();
 	LastControlRotation = ControlRotation;
-	const float SwayScale = FMath::Lerp(1.f, 0.2f, Aim);
+	const float SwayScale = FMath::Lerp(1.f, 0.f, Aim);
 	const FRotator TargetSway(
 		FMath::Clamp(-LookDelta.Pitch * 0.9f, -5.f, 5.f) * SwayScale,
 		FMath::Clamp(-LookDelta.Yaw * 0.9f, -5.f, 5.f) * SwayScale,
@@ -441,32 +539,41 @@ void AShoterCharacter::UpdateFirstPersonView(float DeltaSeconds)
 	{
 		BobTime += DeltaSeconds * (IsSprinting() ? 14.f : 10.f);
 	}
-	const float BobScale = BobIntensity * FMath::Lerp(1.f, 0.12f, Aim);
+	const float BobScale = BobIntensity * FMath::Lerp(1.f, 0.f, Aim);
 	const FVector Bob(0.f, FMath::Sin(BobTime) * 0.9f * BobScale, FMath::Sin(BobTime * 2.f) * 0.6f * BobScale);
 
 	SprintBlend = FMath::FInterpTo(SprintBlend, IsSprinting() ? 1.f : 0.f, DeltaSeconds, 9.f);
 	LandingDip = FMath::FInterpTo(LandingDip, 0.f, DeltaSeconds, 7.f);
 
 	const float EquipDown = Weapon ? 1.f - FMath::InterpEaseOut(0.f, 1.f, Weapon->GetEquipAlpha(), 2.f) : 0.f;
-	const float ReloadAlpha = (Weapon && Weapon->IsReloading()) ? FMath::Sin(Weapon->GetReloadProgress() * PI) : 0.f;
+	FShoterReloadFrame ReloadFrame;
+	if (Weapon)
+	{
+		Weapon->GetReloadFrame(ReloadFrame);
+	}
+	// The gun tilts for the whole reload (in while the hand goes to the magazine, out as it returns), see FShoterReloadSpec.
+	const float ReloadAlpha = ReloadFrame.Tilt;
 
-	const FVector Hip = Stats ? Stats->HipOffset : FVector(30.f, 15.f, -16.f);
-	const FVector AimPosition = Stats ? Stats->AimOffset : FVector(22.f, 0.f, -9.f);
-
-	// Weapon offsets are tuned for the grip; keep the whole model a bit further from the eye so the receiver
-	// never fills the screen while aiming (first-person FOV/scale squash it on screen anyway).
+	// The hip offsets are tuned for the grip; keep the whole model a bit further from the eye so the receiver
+	// never fills the screen (first-person FOV/scale squash it on screen anyway).
 	constexpr float WeaponForwardOffset = 18.f;
-	FVector Location = FMath::Lerp(Hip, AimPosition, Aim) + FVector(WeaponForwardOffset, 0.f, 0.f);
+	// Scaling the whole offset keeps the weapon at the same spot on screen but pushes it away from the eye, so it is smaller.
+	constexpr float HipViewScale = 1.3f;
+	const FVector Hip = ((Stats ? Stats->HipOffset : FVector(30.f, 15.f, -16.f)) + FVector(WeaponForwardOffset, 0.f, 0.f)) * HipViewScale + FVector(0.f, -3.f, 9.f);
+	// While aiming the placement is derived from the weapon's own parts so the aim point stays unobstructed.
+	const FVector AimPosition = Weapon ? Weapon->GetAimViewOffset(WeaponForwardOffset) : FVector(40.f, 0.f, -12.f);
+	FVector Location = FMath::Lerp(Hip, AimPosition, Aim);
 	Location += Bob + SwayOffset;
 	Location.Z -= LandingDip;
 	Location += FVector(-4.f, -3.f, -7.f) * SprintBlend;
 	Location += FVector(0.f, 0.f, -28.f) * EquipDown;
-	Location += FVector(-2.f, 0.f, -9.f) * ReloadAlpha;
+	// Reload staging: the gun comes up and towards the centre and rolls so the magazine well faces the camera.
+	Location += FVector(6.f, -10.f, 3.f) * ReloadAlpha;
 
 	FRotator Rotation = SwayRotation;
 	Rotation += FRotator(-12.f, 28.f, -10.f) * SprintBlend;
 	Rotation += FRotator(-25.f, 0.f, 0.f) * EquipDown;
-	Rotation += FRotator(-18.f, 12.f, 28.f) * ReloadAlpha;
+	Rotation += FRotator(12.f, -22.f, 45.f) * ReloadAlpha;
 
 	if (Weapon)
 	{
@@ -475,6 +582,7 @@ void AShoterCharacter::UpdateFirstPersonView(float DeltaSeconds)
 	}
 
 	WeaponPivot->SetRelativeLocationAndRotation(Location, Rotation);
+	UpdateViewArms(Location, Rotation, Weapon, ReloadFrame);
 
 	// Scoped weapons hide their model while looking through the scope (the HUD draws the scope).
 	if (Weapon && Stats->bHasScope && Weapon->IsEquipped())
@@ -486,26 +594,268 @@ void AShoterCharacter::UpdateFirstPersonView(float DeltaSeconds)
 	}
 }
 
-void AShoterCharacter::ApplyPendingRecoil(float DeltaSeconds)
+// ---------------------------------------------------------------------------
+// First-person arms
+// ---------------------------------------------------------------------------
+
+namespace
 {
-	if (!Controller || PendingRecoil.IsNearlyZero(0.001f))
+	/** The arms mesh is scaled so the mannequin reach covers the hip grip distance of the viewmodel (which is pushed away from the eye). */
+	constexpr float ViewArmScale = 1.0f;
+
+	/** View space (X forward, Y right, Z up) to the mesh space of the mannequin (+Y forward, +X its left). */
+	FVector ViewToMesh(const FVector& V)
+	{
+		return FVector(-V.Y, V.X, V.Z);
+	}
+}
+
+void AShoterCharacter::BuildViewArms()
+{
+	bBuiltViewArms = true;
+	UShoterAssets* Assets = UShoterAssets::Get(this);
+	USkeletalMesh* MeshAsset = GetMesh() ? GetMesh()->GetSkeletalMeshAsset() : nullptr;
+	if (!Assets || !MeshAsset || GetNetMode() == NM_DedicatedServer)
 	{
 		return;
 	}
-	const float Alpha = FMath::Clamp(DeltaSeconds * 25.f, 0.f, 1.f);
-	const FRotator Step = PendingRecoil * Alpha;
-	PendingRecoil -= Step;
 
-	FRotator NewRotation = Controller->GetControlRotation();
-	NewRotation.Pitch += Step.Pitch;
-	NewRotation.Yaw += Step.Yaw;
-	Controller->SetControlRotation(NewRotation);
+	ViewArms = NewObject<UPoseableMeshComponent>(this, TEXT("ViewArms"));
+	ViewArms->SetupAttachment(FirstPersonCamera);
+	ViewArms->SetSkinnedAssetAndUpdate(MeshAsset);
+	ViewArms->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
+	ViewArms->SetRelativeScale3D(FVector(ViewArmScale));
+	ViewArms->SetOnlyOwnerSee(true);
+	ViewArms->SetCastShadow(false);
+	ViewArms->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	ViewArms->SetGenerateOverlapEvents(false);
+	ViewArms->SetCanEverAffectNavigation(false);
+	ViewArms->bReceivesDecals = false;
+	ViewArms->FirstPersonPrimitiveType = EFirstPersonPrimitiveType::FirstPerson;
+	ViewArms->SetBoundsScale(6.f);
+	ViewArms->bPerBoneMotionBlur = false;
+	ViewArms->RegisterComponent();
+
+	ShoterCharacterKit::MakeArmorSlotMaterials(this, ViewArms, ViewArmSlotMaterials);
+	ShoterCharacterKit::Build(this, ViewArms, ShoterCharacterKit::GetTrooperArmKit(), false, ViewArmKit);
+	for (const FShoterKitPart& Part : ViewArmKit)
+	{
+		if (Part.Component)
+		{
+			Part.Component->SetOnlyOwnerSee(true);
+			Part.Component->SetOwnerNoSee(false);
+		}
+	}
+
+	const FReferenceSkeleton& Ref = MeshAsset->GetRefSkeleton();
+	ViewRigRight.Init(Ref, true);
+	ViewRigLeft.Init(Ref, false);
+	RefreshTeamColor();
+}
+
+void AShoterCharacter::UpdateViewArms(const FVector& PivotLocation, const FRotator& PivotRotation, AShoterWeapon* Weapon, const FShoterReloadFrame& ReloadFrame)
+{
+	if (!bBuiltViewArms)
+	{
+		BuildViewArms();
+	}
+	if (!ViewArms || !ViewRigRight.IsValid() || !ViewRigLeft.IsValid())
+	{
+		return;
+	}
+
+	// Hidden together with the weapon: no weapon, being switched out of, or looking through the scope.
+	const bool bScoped = Weapon && Weapon->GetStats().bHasScope && AimAlpha >= 0.9f;
+	const bool bShow = Weapon && Weapon->IsEquipped() && IsAlive() && !bScoped;
+	if (ViewArms->IsVisible() != bShow)
+	{
+		ViewArms->SetVisibility(bShow, true);
+	}
+	if (!bShow)
+	{
+		return;
+	}
+
+	const FShoterWeaponStats& Stats = Weapon->GetStats();
+	const FTransform WeaponToView(PivotRotation, PivotLocation);
+	const float InvScale = 1.f / ViewArmScale;
+
+	auto MakeTarget = [&](const FVector& WeaponLocation, const FRotator& WeaponRotation, float Curl, bool bRight, const FVector& ShoulderView) -> FShoterArmTarget
+	{
+		FShoterArmTarget Target;
+		const FQuat Rotation = WeaponToView.GetRotation() * WeaponRotation.Quaternion();
+		Target.Palm = ViewToMesh(WeaponToView.TransformPosition(WeaponLocation)) * InvScale;
+		Target.Fingers = ViewToMesh(Rotation.RotateVector(FVector::ForwardVector));
+		Target.PalmNormal = ViewToMesh(Rotation.RotateVector(bRight ? FVector::LeftVector : FVector::RightVector));
+		Target.Shoulder = ViewToMesh(ShoulderView) * InvScale;
+		Target.bPullShoulder = true;
+		Target.ElbowPole = ViewToMesh(FVector(-0.5f, bRight ? 0.5f : -0.5f, -1.f));
+		Target.LimbThickness = 0.8f;
+		Target.HandScale = 1.3f;
+		Target.FingerCurl = Curl;
+		Target.ThumbCurl = Curl * 0.8f;
+		return Target;
+	};
+
+	// The shoulders sit behind and below the camera, well out of the frustum; they are pulled along only to keep the arms from stretching.
+	const FVector ShoulderRight(2.f, 24.f, -50.f);
+	const FVector ShoulderLeft(2.f, -14.f, -50.f);
+	const FShoterArmTarget TargetRight = MakeTarget(Stats.RightGrip.Location, Stats.RightGrip.Rotation, Stats.RightGrip.Curl, true, ShoulderRight);
+	const FShoterArmTarget TargetLeft = MakeTarget(ReloadFrame.LeftLocation, ReloadFrame.LeftRotation, ReloadFrame.LeftCurl, false, ShoulderLeft);
+
+	const FReferenceSkeleton& Ref = ViewArms->GetSkinnedAsset()->GetRefSkeleton();
+	FShoterArmRig::CollapseAll(Ref, ViewArmPose, (TargetRight.Shoulder + TargetLeft.Shoulder) * 0.5);
+	ViewRigRight.Solve(TargetRight, ViewArmPose, false);
+	ViewRigLeft.Solve(TargetLeft, ViewArmPose, false);
+	FShoterArmRig::ToLocalSpace(Ref, ViewArmPose, ViewArms->BoneSpaceTransforms);
+	ViewArms->RefreshBoneTransforms();
+}
+
+void AShoterCharacter::OnBodyBonesFinalized()
+{
+	AShoterWeapon* Weapon = CurrentWeapon;
+	USkeletalMeshComponent* Body = GetMesh();
+	if (!Weapon || !Weapon->IsReloading() || bIsDying || !Body || !Body->GetSkeletalMeshAsset() || !Weapon->IsEquipped())
+	{
+		return;
+	}
+	FShoterReloadFrame Frame;
+	Weapon->GetReloadFrame(Frame);
+	FTransform WeaponToWorld;
+	if (Frame.LeftWeight <= 0.002f || !Weapon->GetThirdPersonModelTransform(WeaponToWorld))
+	{
+		return;
+	}
+	if (!BodyRigLeft.IsValid() && !BodyRigLeft.Init(Body->GetSkeletalMeshAsset()->GetRefSkeleton(), false))
+	{
+		return;
+	}
+
+	// The read buffer of the finished pose; this is what gets rendered.
+	TArray<FTransform>& CS = const_cast<TArray<FTransform>&>(Body->GetComponentSpaceTransforms());
+	if (CS.Num() != Body->GetSkeletalMeshAsset()->GetRefSkeleton().GetNum())
+	{
+		return;
+	}
+
+	const FTransform WeaponToMesh = WeaponToWorld.GetRelativeTransform(Body->GetComponentTransform());
+	const FQuat Rotation = WeaponToMesh.GetRotation() * Frame.LeftRotation.Quaternion();
+	FShoterArmTarget Target;
+	Target.Palm = WeaponToMesh.TransformPosition(Frame.LeftLocation);
+	Target.Fingers = Rotation.RotateVector(FVector::ForwardVector);
+	Target.PalmNormal = Rotation.RotateVector(FVector::RightVector);
+	Target.FingerCurl = Frame.LeftCurl;
+	Target.ThumbCurl = Frame.LeftCurl * 0.8f;
+	// Keep the elbow on the side the animation already has it.
+	const int32 Upper = BodyRigLeft.GetUpperArmBone();
+	const FVector Shoulder = CS[Upper].GetLocation();
+	const FVector Elbow = CS[Body->GetSkeletalMeshAsset()->GetRefSkeleton().GetParentIndex(BodyRigLeft.GetHandBone())].GetLocation();
+	Target.ElbowPole = (Elbow - (Shoulder + CS[BodyRigLeft.GetHandBone()].GetLocation()) * 0.5).GetSafeNormal();
+
+	BodyPoseBackup.Reset();
+	for (const int32 Bone : BodyRigLeft.GetDrivenBones())
+	{
+		BodyPoseBackup.Add(CS[Bone]);
+	}
+	BodyRigLeft.Solve(Target, CS, true);
+	const float Weight = Frame.LeftWeight;
+	const TArray<int32>& Driven = BodyRigLeft.GetDrivenBones();
+	for (int32 Index = 0; Index < Driven.Num(); ++Index)
+	{
+		FTransform& Pose = CS[Driven[Index]];
+		const FTransform& Anim = BodyPoseBackup[Index];
+		Pose.SetLocation(FMath::Lerp(Anim.GetLocation(), Pose.GetLocation(), Weight));
+		Pose.SetRotation(FQuat::Slerp(Anim.GetRotation(), Pose.GetRotation(), Weight).GetNormalized());
+	}
+	Body->UpdateChildTransforms();
+	Body->MarkRenderDynamicDataDirty();
+}
+
+float AShoterCharacter::GetEasedAimAlpha() const
+{
+	return FMath::InterpEaseInOut(0.f, 1.f, AimAlpha, 2.f);
+}
+
+void AShoterCharacter::ResetRecoil()
+{
+	PendingRecoil = FRotator::ZeroRotator;
+	RecoilToRecover = FRotator::ZeroRotator;
+	bRecoilTrackedValid = false;
+}
+
+void AShoterCharacter::ApplyPendingRecoil(float DeltaSeconds)
+{
+	if (!Controller)
+	{
+		bRecoilTrackedValid = false;
+		return;
+	}
+
+	constexpr double MaxAccumulatedRecoil = 10.0;
+	constexpr float RecoveryDelay = 0.12f;
+
+	FRotator Control = Controller->GetControlRotation();
+
+	// Player compensation: whatever the player did on their own since we last wrote the rotation and that opposes
+	// the accumulated recoil (pulling down, counter-steering yaw) is subtracted, so recovery never drags the view
+	// below where the player is holding it.
+	if (bRecoilTrackedValid)
+	{
+		const FRotator PlayerDelta = (Control - RecoilTrackedRotation).GetNormalized();
+		auto Compensate = [](double& Accumulated, double Delta)
+		{
+			if (Accumulated * Delta < 0.f)
+			{
+				Accumulated = FMath::Sign(Accumulated) * FMath::Max(0.0, FMath::Abs(Accumulated) - FMath::Abs(Delta));
+			}
+		};
+		Compensate(RecoilToRecover.Pitch, PlayerDelta.Pitch);
+		Compensate(RecoilToRecover.Yaw, PlayerDelta.Yaw);
+	}
+
+	// Apply the pending recoil smoothly and remember what was applied.
+	if (!PendingRecoil.IsNearlyZero(0.001f))
+	{
+		const float Alpha = FMath::Clamp(DeltaSeconds * 25.f, 0.f, 1.f);
+		const FRotator Step = PendingRecoil * Alpha;
+		PendingRecoil -= Step;
+
+		const double NewPitchAcc = FMath::Clamp(RecoilToRecover.Pitch + Step.Pitch, -MaxAccumulatedRecoil, MaxAccumulatedRecoil);
+		const double NewYawAcc = FMath::Clamp(RecoilToRecover.Yaw + Step.Yaw, -MaxAccumulatedRecoil, MaxAccumulatedRecoil);
+		Control.Pitch += NewPitchAcc - RecoilToRecover.Pitch;
+		Control.Yaw += NewYawAcc - RecoilToRecover.Yaw;
+		RecoilToRecover.Pitch = NewPitchAcc;
+		RecoilToRecover.Yaw = NewYawAcc;
+	}
+
+	// Once the trigger has been released for a moment, bring the view back toward where it was.
+	if (!RecoilToRecover.IsNearlyZero(0.001f) && GetWorld()->GetTimeSeconds() - LastRecoilTime > RecoveryDelay)
+	{
+		const FRotator Recovery = RecoilToRecover * FMath::Clamp(DeltaSeconds * 9.f, 0.f, 1.f);
+		Control.Pitch -= Recovery.Pitch;
+		Control.Yaw -= Recovery.Yaw;
+		RecoilToRecover -= Recovery;
+		if (RecoilToRecover.IsNearlyZero(0.01f))
+		{
+			RecoilToRecover = FRotator::ZeroRotator;
+		}
+	}
+
+	Controller->SetControlRotation(Control);
+	RecoilTrackedRotation = Controller->GetControlRotation();
+	bRecoilTrackedValid = true;
 }
 
 void AShoterCharacter::AddRecoil(float PitchDegrees, float YawDegrees)
 {
+	// Only player-controlled characters ever consume recoil (AI aims with its own logic).
+	if (!Controller || !IsPlayerControlled())
+	{
+		return;
+	}
 	PendingRecoil.Pitch += PitchDegrees;
 	PendingRecoil.Yaw += YawDegrees;
+	LastRecoilTime = GetWorld()->GetTimeSeconds();
 }
 
 void AShoterCharacter::UpdateInteractionFocus()
@@ -825,6 +1175,11 @@ void AShoterCharacter::MulticastDeath_Implementation(FVector_NetQuantizeNormal H
 	bIsDying = true;
 	bWantsToFire = false;
 	FocusedInteractable = nullptr;
+	ResetRecoil();
+	if (ViewArms)
+	{
+		ViewArms->SetVisibility(false, true);
+	}
 
 	if (UCharacterMovementComponent* Movement = GetCharacterMovement())
 	{
@@ -1004,6 +1359,7 @@ void AShoterCharacter::SetCurrentWeapon(AShoterWeapon* NewWeapon, AShoterWeapon*
 	}
 
 	CurrentWeapon = NewWeapon;
+	ResetRecoil();
 
 	if (NewWeapon)
 	{
@@ -1258,7 +1614,7 @@ void AShoterCharacter::Input_Look(const FInputActionValue& Value)
 		return;
 	}
 	const FVector2D Axis = Value.Get<FVector2D>();
-	const float Scale = PC->GetMouseLookScale(AimAlpha > 0.5f);
+	const float Scale = PC->GetMouseLookScale(GetEasedAimAlpha(), CurrentWeapon ? CurrentWeapon->GetStats().AimFOV : 180.f);
 	AddControllerYawInput(Axis.X * Scale);
 	AddControllerPitchInput(Axis.Y * Scale * (PC->IsLookInverted() ? -1.f : 1.f));
 }
@@ -1273,7 +1629,7 @@ void AShoterCharacter::Input_LookGamepad(const FInputActionValue& Value)
 	const FVector2D Axis = Value.Get<FVector2D>();
 	const float DeltaSeconds = GetWorld()->GetDeltaSeconds();
 	// Rate based: degrees per second at full deflection, scaled by the same sensitivity setting.
-	const float Sensitivity = PC->GetMouseLookScale(AimAlpha > 0.5f) / 0.07f;
+	const float Sensitivity = PC->GetMouseLookScale(GetEasedAimAlpha(), CurrentWeapon ? CurrentWeapon->GetStats().AimFOV : 180.f) / 0.07f;
 	AddControllerYawInput(Axis.X * 220.f * Sensitivity * DeltaSeconds);
 	AddControllerPitchInput(Axis.Y * 150.f * Sensitivity * DeltaSeconds * (PC->IsLookInverted() ? -1.f : 1.f));
 }

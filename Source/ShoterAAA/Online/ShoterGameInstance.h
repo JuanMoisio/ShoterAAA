@@ -113,6 +113,10 @@ protected:
 	int32 AutoShotIndex = 0;
 	float AutoShotTimer = 0.f;
 	bool bAutoShotPrepared = false;
+	bool bBurstStarted = false;
+	float BurstStartTime = 0.f;
+	float BurstEndTime = 0.f;
+	float LastBurstShotTime = 0.f;
 
 	IOnlineSessionPtr GetSessionInterface() const;
 	void CreateHostSession();

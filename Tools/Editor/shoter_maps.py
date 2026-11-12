@@ -19,6 +19,12 @@ Layout cheat sheet (top view, X right, Y up):
   | base |  broken lane wall Y=-1100 (gaps)                                    |  base   |
   |pocket|  S lane (Y -2000..-1150), catwalk B (deck Z 330) over Y -2000..-1500 [Ripper] |
   +------------------------------------------------------------------------------------+
+
+Cover (three height classes): LOW 120 (crouch), MID ~200-230 (standing, the double jump climbs it), TALL 300+ (hard cover
+that also blocks sight from elevated positions).  Yards: one bunker (room with a window slit and two doorways) in one half,
+two staggered tall slabs in the other, a tall slab in front of each base mouth; lanes: tall crates and baffle walls; catwalks:
+parapet, shield, dividers, roof and end walls; platform: 120 cm parapet, tall corner walls and two tall slabs by the station.
+Everything added for one side exists for the other by 180 degree rotation about the origin (see frame()).
 """
 import math
 import os
@@ -329,6 +335,42 @@ def rot180(x, y):
     return (-x, -y)
 
 
+def frame(turned):
+    """
+    Returns (pt, rng): maps a point / an (xr, yr) pair of ranges from the layout frame of one half of the arena to world
+    coordinates.  turned=True applies the 180 degree rotation about the origin that produces the other half (red yard,
+    south lane, south catwalk), so everything built through a frame exists for both sides.
+    """
+    def pt(x, y):
+        return rot180(x, y) if turned else (x, y)
+
+    def rng(xr, yr):
+        if turned:
+            return _rng(-xr[0], -xr[1]), _rng(-yr[0], -yr[1])
+        return _rng(xr[0], xr[1]), _rng(yr[0], yr[1])
+    return pt, rng
+
+
+# Height classes: LOW = crouch cover, MID = standing cover (the double jump climbs it), TALL = hard cover that also blocks
+# sight from elevated positions.  (Single jump rises about 155 cm, the double jump about 310 cm at best.)
+LOW, MID, TALL = 120.0, 200.0, 320.0
+
+
+def solid(b, label, xr, yr, zr, neon, folder="Geometry/Cover", material="dark", trim=True):
+    """
+    Free-form solid (wall, slab, roof) with a thin neon band: just below the top edge, or a cap on top for thin slabs.
+    Same look as cover(), but with an arbitrary vertical range.
+    """
+    b.box(label, xr, yr, zr, material, folder, kind="solid")
+    if not trim:
+        return
+    if zr[1] - zr[0] >= 40.0:
+        band = (zr[1] - 16.0, zr[1] - 8.0)
+        b.box(label + "_Trim", (xr[0] - 1.5, xr[1] + 1.5), (yr[0] - 1.5, yr[1] + 1.5), band, neon, "Neon", kind="trim")
+    else:
+        b.box(label + "_Trim", (xr[0] + 8.0, xr[1] - 8.0), (yr[0] + 8.0, yr[1] - 8.0), (zr[1], zr[1] + 4.0), neon, "Neon", kind="trim")
+
+
 # =========================================================================== arena parts
 
 def build_shell(b):
@@ -357,7 +399,11 @@ def build_shell(b):
 
 
 def build_base(b, team):
-    """One team base: alcove (side walls), team floor plate, emblem, console, four cover blocks, spawn rows, lights."""
+    """
+    One team base: alcove (side walls), team floor plate, emblem, console, four cover blocks (the two mouth blocks are MID),
+    a TALL slab just outside the alcove on the long axis (hides the spawners from the platform / pillar axis, both
+    sides stay wide open), spawn rows, lights.
+    """
     sgn = 1.0 if team == "blue" else -1.0          # +1: the alcove opens toward +X
     neon = team
     wall_key = "wall_" + team
@@ -384,8 +430,9 @@ def build_base(b, team):
     b.box("Base_{}_Console".format(label), xr(10, 60), (-400, 400), (0, 100), "dark", "Geometry/Bases", kind="solid")
     b.box("Base_{}_ConsoleTrim".format(label), xr(10, 60), (-400, 400), (100, 106), neon, "Neon", kind="trim")
 
-    cover(b, "Cover_{}_Mouth".format(label), xr(600, 700), (-750, -450), 120, neon)
-    cover(b, "Cover_{}_Mouth".format(label), xr(600, 700), (450, 750), 120, neon)
+    cover(b, "Cover_{}_Mouth".format(label), xr(600, 700), (-750, -450), MID, neon)
+    cover(b, "Cover_{}_Mouth".format(label), xr(600, 700), (450, 750), MID, neon)
+    solid(b, "Cover_{}_MouthSlab".format(label), xr(795, 825), (-250, 250), (0, TALL), neon, "Geometry/Cover")
     cover(b, "Cover_{}_Side".format(label), xr(350, 550), (950, 1050), 120, neon)
     cover(b, "Cover_{}_Side".format(label), xr(350, 550), (-1050, -950), 120, neon)
 
@@ -399,7 +446,10 @@ def build_base(b, team):
 
 
 def build_center(b):
-    """Raised platform with two ramps, low parapet, neon trim and the zombie-mode start positions."""
+    """
+    Raised platform with two ramps, 120 cm parapet with gaps, tall L-shaped corner walls, two tall slabs flanking the
+    central station (it stays open to the east and west, towards the ramps), neon trim and the zombie-mode start positions.
+    """
     C.log("  center platform")
     folder = "Geometry/Center"
     b.box("Platform_Body", (-600, 600), (-600, 600), (0, 190), "wall", folder, kind="solid")
@@ -414,21 +464,31 @@ def build_center(b):
         for yr in ((-312, -300), (300, 312)):
             b.ramp("Ramp_{}_Edge".format(name), sgn * 1200.0, sgn * 600.0, 0.0, 200.0, yr, 10.0, "cyan", "Neon")
 
-    # Low parapet (90 cm) with gaps: 400 at the middle of N/S edges, 600 where the ramps arrive.
+    # Parapet (120 cm) with gaps: 400 at the middle of N/S edges, 600 where the ramps arrive; the corners are taller (below).
     segments = []
     for sy in (-1, 1):
-        for x0, x1 in ((-600, -200), (200, 600)):
+        for x0, x1 in ((-440, -200), (200, 440)):
             segments.append(((x0, x1), _rng(sy * 560, sy * 600)))
     for sx in (-1, 1):
-        for y0, y1 in ((-600, -300), (300, 600)):
+        for y0, y1 in ((-440, -300), (300, 440)):
             segments.append((_rng(sx * 560, sx * 600), (y0, y1)))
     for xr_, yr_ in segments:
-        b.box("Parapet", xr_, yr_, (200, 290), "dark", folder, kind="solid")
+        b.box("Parapet", xr_, yr_, (200, 320), "dark", folder, kind="solid")
         if (xr_[1] - xr_[0]) >= (yr_[1] - yr_[0]):
             cap_x, cap_y = xr_, (yr_[0] + 10, yr_[1] - 10)
         else:
             cap_x, cap_y = (xr_[0] + 10, xr_[1] - 10), yr_
-        b.box("Parapet_Cap", cap_x, cap_y, (290, 296), "cyan", "Neon", kind="trim")
+        b.box("Parapet_Cap", cap_x, cap_y, (320, 326), "cyan", "Neon", kind="trim")
+
+    # Tall L-shaped corner walls (260 above the deck, legs 160 long, 40 thick).
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            solid(b, "Corner_Wall", _rng(sx * 440, sx * 600), _rng(sy * 560, sy * 600), (200, 460), "cyan", folder)
+            solid(b, "Corner_Wall", _rng(sx * 560, sx * 600), _rng(sy * 440, sy * 560), (200, 460), "cyan", folder)
+
+    # Two tall slabs north and south of the station: the deck is no longer one open square, the station is entered from E / W.
+    for sy in (-1, 1):
+        solid(b, "Station_Slab", (-200, 200), _rng(sy * 160, sy * 190), (200, 460), "cyan", folder)
 
     for sx in (-1, 1):
         for sy in (-1, 1):
@@ -464,56 +524,147 @@ def build_lane_walls(b):
 
 
 def build_cover(b):
-    """Scattered waist-high cover (about 200 x 100 x 120) in the yards, lanes and pockets."""
-    C.log("  cover blocks")
-    # Yards in front of each base, mirrored on both axes.
-    for sx in (-1, 1):
-        for sy in (-1, 1):
-            neon = "blue" if sx < 0 else "red"
-            box_at(b, "Cover_Yard", sx * 2000, sy * 520, 100, 240, 120, neon)
-            box_at(b, "Cover_Yard", sx * 1450, sy * 680, 200, 100, 120, "cyan")
-            box_at(b, "Cover_Yard", sx * 1050, sy * 750, 100, 200, 120, "cyan")
+    """Cover in the yards (bunkers, tall slabs, MID crates), the side lanes and the corner pockets."""
+    C.log("  cover: yards and lanes")
+    build_yards(b)
+    build_lanes(b)
 
-    # Lanes: defined for the north lane (y > 0); the south lane is the same layout rotated 180 degrees about the origin.
-    lane = [
-        (-2000, 1520, 200, 100, "magenta"),
-        (-1450, 1600, 100, 200, "magenta"),
-        (1250, 1520, 200, 100, "magenta"),
-        (1800, 1600, 100, 200, "magenta"),
-        (-2650, 1500, 200, 100, "magenta"),      # pocket behind the blue base
-        (2650, 1500, 200, 100, "magenta"),       # pocket behind the red base
-        (2150, 1650, 100, 200, "magenta"),
-    ]
+
+def build_bunker(b, turned):
+    """
+    Small room (500 x 400, 30 cm walls, 300 high, roof) in one half of a yard.  Blue frame: x -1750..-1250, y 300..700.
+    Two 200 wide doorways on different sides (west, towards the base, and south, towards the long axis) so it is never a
+    dead end, and a window slit facing the arena centre (solid below 110 and above 180 cm).  The turned copy belongs to red.
+    """
+    pt, rng = frame(turned)
+    team = "red" if turned else "blue"
+    wall = "wall_" + team
+    folder = "Geometry/Bunkers"
+    x0, x1, y0, y1, t, h = -1750.0, -1250.0, 300.0, 700.0, 30.0, 300.0
+
+    def part(label, xr, yr, zr):
+        solid(b, "Bunker_" + label, *rng(xr, yr), zr=zr, neon=team, folder=folder, material=wall, trim=False)
+
+    part("North", (x0, x1), (y1 - t, y1), (0, h))
+    part("South", (x0, -1650), (y0, y0 + t), (0, h))
+    part("South", (-1450, x1), (y0, y0 + t), (0, h))
+    part("DoorLintel", (-1650, -1450), (y0, y0 + t), (220, h))
+    part("West", (x0, x0 + t), (y0, 420), (0, h))
+    part("West", (x0, x0 + t), (620, y1), (0, h))
+    part("DoorLintel", (x0, x0 + t), (420, 620), (220, h))
+    part("East", (x1 - t, x1), (y0, y1), (0, 110))
+    part("East", (x1 - t, x1), (y0, y1), (180, h))
+    part("WindowJamb", (x1 - t, x1), (y0, 440), (110, 180))
+    part("WindowJamb", (x1 - t, x1), (560, y1), (110, 180))
+    solid(b, "Bunker_Roof", *rng((x0 - 15, x1 + 15), (y0 - 15, y1 + 15)), zr=(h, h + 15), neon=team, folder=folder, material="dark")
+    # Neon band around the top of the four walls (it also runs over the lintels).
+    for xr_, yr_ in (((x0, x1), (y1 - t, y1)), ((x0, x1), (y0, y0 + t)), ((x0, x0 + t), (y0, y1)), ((x1 - t, x1), (y0, y1))):
+        r_x, r_y = rng((xr_[0] - 1.5, xr_[1] + 1.5), (yr_[0] - 1.5, yr_[1] + 1.5))
+        b.box("Bunker_Trim", r_x, r_y, (h - 16, h - 8), team, "Neon", kind="trim")
+    cx, cy = pt((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+    b.point_light("Bunker_Glow", (cx, cy, 230), team, 220, 500, "Lighting/Bunkers")
+
+
+def build_yards(b):
+    """
+    The ground between each base mouth and the platform ramps.  Defined for blue (x < 0) and rotated 180 degrees for red:
+    one bunker in the y > 0 half, two staggered TALL slabs across the long axis in the y < 0 half, two LOW crates and a
+    MID crate in front of each lane wall gap.
+    """
     for turned in (False, True):
-        for cx, cy, sx_, sy_, neon in lane:
-            if turned:
-                cx, cy = rot180(cx, cy)
-            box_at(b, "Cover_Lane", cx, cy, sx_, sy_, 120, "orange" if turned else neon)
+        pt, rng = frame(turned)
+        neon = "red" if turned else "blue"
+        build_bunker(b, turned)
+        # Staggered tall slabs perpendicular to the long axis (passages between them and the crates stay >= 180 cm).
+        solid(b, "Yard_Slab", *rng((-1895, -1865), (-850, -450)), zr=(0, TALL), neon=neon)
+        solid(b, "Yard_Slab", *rng((-1465, -1435), (-540, -200)), zr=(0, TALL), neon="cyan")
+        cx, cy = pt(-2000, 520)
+        box_at(b, "Cover_Yard", cx, cy, 100, 240, LOW, neon)
+        # MID crates that screen the lane wall gaps (x -1300..-900) from the middle of the arena.
+        for sy in (-1, 1):
+            cx, cy = pt(-980, sy * 830)
+            box_at(b, "Cover_Yard", cx, cy, 200, 80, MID, "cyan")
+
+
+# Side lane pieces, defined for the north lane (y > 0); the south lane is the same layout rotated 180 degrees about the origin.
+# (kind, x range, y range, height, neon): crates stand free, baffles are thin walls attached to the lane wall (y 1150)
+# or to the outer wall (y 2000).
+LANE_PIECES = [
+    ("crate", (-2260, -2090), (1380, 1560), TALL, "magenta"),
+    ("baffle", (-1515, -1485), (1150, 1560), 230.0, "magenta"),
+    ("baffle", (-1330, -1300), (1740, 2000), 230.0, "magenta"),
+    ("low", (-1900, -1700), (1450, 1550), LOW, "magenta"),
+    ("baffle", (1385, 1415), (1550, 2000), 230.0, "magenta"),
+    ("baffle", (1885, 1915), (1150, 1620), 230.0, "magenta"),
+    ("crate", (2080, 2260), (1700, 1880), TALL, "magenta"),
+    ("low", (-2750, -2550), (1450, 1550), LOW, "magenta"),      # pocket behind the blue base
+    ("low", (2550, 2750), (1450, 1550), LOW, "magenta"),        # pocket behind the red base
+]
+
+
+def build_lanes(b):
+    """Side lane cover: TALL crates and MID baffles that break the long sight lines, plus a few LOW crates for rhythm."""
+    for turned in (False, True):
+        pt, rng = frame(turned)
+        for kind, xr_, yr_, height, neon in LANE_PIECES:
+            r_x, r_y = rng(xr_, yr_)
+            cover(b, "Lane_" + kind.capitalize(), r_x, r_y, height, "orange" if turned else neon)
 
 
 def build_catwalks(b):
-    """Two elevated decks (top at 330 cm) reachable with the double jump or via two step crates."""
+    """
+    Two elevated decks (top at 330 cm) reachable via two step crates at one end (the double jump alone cannot reach 330) or
+    from the arena side over the parapet gaps with the help of two 230 cm crates.  Each deck has a 120 cm parapet along its
+    inner edge (two 250 cm gaps), a roofed middle bay with the weapon station behind a tall shield panel, two dividers
+    attached to the back wall, partial end walls and a >= 180 cm passage along the inner side.  North deck in the layout
+    frame, the south one is the 180 degree rotation.
+    """
     C.log("  catwalks")
+    deck = 330.0
     for turned, name, neon in ((False, "A", "cyan"), (True, "B", "magenta")):
-        def P(x0, x1, y0, y1):
-            if turned:
-                return _rng(-x0, -x1), _rng(-y0, -y1)
-            return _rng(x0, x1), _rng(y0, y1)
+        pt, rng = frame(turned)
 
+        def P(x0, x1, y0, y1):
+            return rng((x0, x1), (y0, y1))
+
+        folder = "Geometry/Catwalks"
         xr_, yr_ = P(-700, 700, 1500, 2000)
-        b.box("Catwalk_{}_Deck".format(name), xr_, yr_, (300, 330), "light", "Geometry/Catwalks", kind="trim")
+        b.box("Catwalk_{}_Deck".format(name), xr_, yr_, (300, 330), "light", folder, kind="trim")
         xr_, yr_ = P(-700, 700, 1494, 1500)
         b.box("Catwalk_{}_Lip".format(name), xr_, yr_, (300, 330), neon, "Neon", kind="trim")
         for px0, px1, py0, py1 in ((-700, -600, 1500, 1600), (600, 700, 1500, 1600), (-700, -600, 1900, 2000), (600, 700, 1900, 2000)):
             xr_, yr_ = P(px0, px1, py0, py1)
-            b.box("Catwalk_{}_Post".format(name), xr_, yr_, (0, 300), "dark", "Geometry/Catwalks", kind="solid")
+            b.box("Catwalk_{}_Post".format(name), xr_, yr_, (0, 300), "dark", folder, kind="solid")
         # Step crates at the west end (north deck) / east end (south deck).
         xr_, yr_ = P(-1100, -900, 1600, 1800)
-        cover(b, "Catwalk_{}_Step1".format(name), xr_, yr_, 120, neon, "Geometry/Catwalks")
+        cover(b, "Catwalk_{}_Step1".format(name), xr_, yr_, 120, neon, folder)
         xr_, yr_ = P(-900, -700, 1600, 1800)
-        cover(b, "Catwalk_{}_Step2".format(name), xr_, yr_, 230, neon, "Geometry/Catwalks")
+        cover(b, "Catwalk_{}_Step2".format(name), xr_, yr_, 230, neon, folder)
+
+        def piece(label, x0, x1, y0, y1, z1, z0=deck):
+            xr_, yr_ = P(x0, x1, y0, y1)
+            solid(b, "Catwalk_{}_{}".format(name, label), xr_, yr_, (z0, z1), neon, folder)
+
+        # Parapet along the arena edge (gaps at x -580..-330 and 330..580).
+        for x0, x1 in ((-700, -580), (-330, 330), (580, 700)):
+            piece("Parapet", x0, x1, 1500, 1518, deck + 120)
+        # Dividers on the back wall, shield in front of the station (205 cm from it), roof on the dividers.
+        for x0, x1 in ((-300, -280), (280, 300)):
+            piece("Divider", x0, x1, 1700, 2000, deck + 230)
+        piece("Shield", -100, 100, 1700, 1720, deck + 230)
+        piece("Roof", -300, 300, 1700, 2000, deck + 245, z0=deck + 230)
+        # Partial end walls: the step end keeps its access (steps at y 1600..1800), the far end keeps a 180 cm opening.
+        piece("EndWall", -700, -680, 1830, 2000, deck + 230)
+        piece("EndWall", 680, 700, 1700, 2000, deck + 230)
+        # Arena side access over the parapet gaps.
+        for x0, x1 in ((-535, -355), (355, 535)):
+            xr_, yr_ = P(x0, x1, 1400, 1490)
+            cover(b, "Catwalk_{}_Climb".format(name), xr_, yr_, 230, neon, folder)
+
         y_light = -1750 if turned else 1750
         b.point_light("Catwalk_{}_Under".format(name), (0, y_light, 270), neon, 450, 900, "Lighting/Catwalks")
+        bay = pt(0, 1850)
+        b.point_light("Catwalk_{}_Bay".format(name), (bay[0], bay[1], 520), neon, 220, 450, "Lighting/Catwalks")
 
 
 VENTS = [

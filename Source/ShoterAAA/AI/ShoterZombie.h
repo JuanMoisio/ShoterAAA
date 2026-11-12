@@ -4,6 +4,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "Core/ShoterTypes.h"
+#include "Core/ShoterCharacterKit.h"
 #include "ShoterZombie.generated.h"
 
 class UMaterialInstanceDynamic;
@@ -77,6 +78,22 @@ protected:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> BodyMaterial;
+
+	/** Dynamic instances of the mesh's own slot materials (corrupted palette). */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> BodySlotMaterials;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> RimOverlayMaterial;
+
+	/** Cosmetic kit (eyes, chest core, armour remnants), built locally. */
+	UPROPERTY(Transient)
+	TArray<FShoterKitPart> KitParts;
+
+	UPROPERTY(Transient)
+	FShoterKitMaterials KitMaterials;
+
+	int32 KitBuiltForType = -1;
 
 	/** Glowing eyes of the placeholder body. */
 	UPROPERTY(Transient)

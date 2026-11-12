@@ -41,6 +41,13 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Projectile")
 	TObjectPtr<UPointLightComponent> Light;
 
+	/** Cosmetic glow tail and soft halo so the orb reads clearly in flight (only for projectiles that point along their velocity). */
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> Trail;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> Halo;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Projectile") float DirectHitDamage = 30.f;
 	UPROPERTY(EditDefaultsOnly, Category = "Projectile") float ExplosionDamage = 95.f;
 	UPROPERTY(EditDefaultsOnly, Category = "Projectile") float ExplosionMinDamage = 10.f;

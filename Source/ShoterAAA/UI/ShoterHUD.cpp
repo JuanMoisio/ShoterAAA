@@ -504,10 +504,12 @@ void AShoterHUD::DrawCrosshair()
 	}
 
 	const float LineAlpha = (1.f - AimAlpha) * Fade;
-	const float DotAlpha = (0.55f + 0.45f * AimAlpha) * Fade;
+	const float DotAlpha = 0.55f * (1.f - AimAlpha) * Fade;
 
 	const float CX = FMath::RoundToFloat(CenterX);
 	const float CY = FMath::RoundToFloat(CenterY);
+
+	// While aiming down sights nothing is drawn here: the weapon's own sight marks the aim point.
 	const float Thick = FMath::Max(1.f, FMath::RoundToFloat(U(2.f)));
 	const float Len = FMath::RoundToFloat(U(11.f));
 	const float Gap = FMath::RoundToFloat(CrosshairGap);

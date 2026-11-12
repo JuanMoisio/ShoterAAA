@@ -117,19 +117,28 @@ C++ gameplay actors. Actors are in World Outliner folders (`Geometry/...`, `Neon
 ```
 
 * **Shell**: floor slab, perimeter walls 800 cm tall (strip at 300 cm comes from `M_Shoter_Wall`), blue/red tinted ends.
-* **Bases** at X = -2600 (blue) / +2600 (red): 750 x 2100 alcove with side walls, team floor plate, emblem and console, 4 cover blocks, a
-  rect light, 6 `ShoterPlayerStart` (TeamId 0/1, PvP only).
-* **Centre**: platform 1200 x 1200 x 200 with 2 ramps (18.4 degrees), 90 cm parapet with gaps, 6 pillars 200 x 200 x 800, Plasma Launcher
-  station in the middle, 6 zombie-mode starts on top (Z 300).
-* **Lanes** at Y = +-1500: broken walls (360 cm) with 400 / 600 cm gaps; 34 waist-high cover blocks in total (bases, yards, lanes,
-  corner pockets; about 200 x 100 x 120); two catwalks (deck top at 330 cm: reachable with the double jump, or with the two step
-  crates of 120 / 230 cm at one end of each deck).
+* **Bases** at X = -2600 (blue) / +2600 (red): 750 x 2100 alcove with side walls, team floor plate, emblem and console, 4 cover blocks
+  (the two mouth blocks are MID, 200 cm), a TALL slab (500 wide, 320 high) on the long axis just outside the alcove (X = -2190 / +2190:
+  hides the spawners from the platform axis, both sides stay open), a rect light, 6 `ShoterPlayerStart` (TeamId 0/1, PvP only).
+* **Centre**: platform 1200 x 1200 x 200 with 2 ramps (18.4 degrees), 120 cm parapet with gaps, four tall L-shaped corner walls (260 cm
+  above the deck, 160 cm legs), two tall slabs north / south of the Plasma Launcher station (it is entered from the ramps side), 6 pillars
+  200 x 200 x 800, 6 zombie-mode starts on top (Z 300).
+* **Yards** (blue; red is the 180 degree rotation): a bunker at X -1750..-1250, Y 300..700 (500 x 400 room, 30 cm walls, 300 high, roof,
+  doorways 200 wide on the west and south sides, window slit Z 110..180 facing the centre, dim interior light); in the other half two
+  staggered tall slabs (X -1880 and X -1450, perpendicular to the long axis); two LOW crates and two MID crates (Y +-830) that screen
+  the lane wall gaps.
+* **Lanes** at Y = +-1500: broken walls (360 cm) with 400 / 600 cm gaps; per lane (see `LANE_PIECES`) tall crates and 230 cm baffle walls
+  attached to the lane wall or the outer wall, staggered left / right so no one sees down more than about a third of the lane, plus a few
+  LOW crates. Two catwalks (deck top at 330 cm, reached with the two step crates of 120 / 230 cm at one end of each deck, or from the arena
+  side with two 230 cm crates at the parapet gaps - the double jump alone, about 310 cm at best, does not reach 330): 120 cm parapet along
+  the arena edge with two 250 cm gaps, a roofed middle bay with the weapon station behind a tall shield, two dividers on the back wall,
+  partial end walls, and a 180 cm passage along the inner side.
 * **Gameplay**: 8 neutral starts (PvP only), 12 `ShoterZombieSpawnPoint` in decorative vent alcoves facing inward (2 with `MinWave` 3),
   7 `ShoterBuyStation`: Pulse Rifle and Scatter (lane walls, middle side), two ammo stations, Rail (catwalk A), Ripper (catwalk B),
   Plasma Launcher (centre). `PvPCooldown` per station is set from `PVP_COOLDOWN`, `CostOverride` is -1.
 * **Navigation**: one `NavMeshBoundsVolume` scaled to 6400 x 4400 x 1200 cm (arena only).
 * **Lighting**: bluish dim moon (`DirectionalLight` 2 lux, atmosphere sun light, shadows), `SkyAtmosphere`, real-time-capture `SkyLight`,
-  `ExponentialHeightFog` (volumetric, bluish), 33 unshadowed point lights and 8 rect lights next to the neon, unbound
+  `ExponentialHeightFog` (volumetric, bluish), 37 unshadowed point lights and 8 rect lights next to the neon, unbound
   `PostProcessVolume` (bloom 1.2, auto exposure clamped to brightness 0.5..2 = EV100 2..4 when the project uses the extended luminance
   range, slight vignette, no motion blur). All lights are Movable (the project disables static lighting, Lumen is on).
 * **Skyline**: 20 dark towers with glowing bands outside the walls (`ADD_SKYLINE`).
@@ -167,3 +176,21 @@ The log tells you. The calls most likely to need a tweak on UE 5.8:
    `AssetImportTask`, `SoundWave.bLooping/Volume`, project classes (`team_id`, `use_in_zombies`, `use_in_pv_p`, ...).
 5. `MaterialEditingLibrary`: `create_material_expression`, `connect_material_expressions` (empty input name = first input),
    `connect_material_property`, `get_statistics`, `set_material_instance_*_parameter_value`, `update_material_instance`.
+
+## Character look (neon trooper / corrupted android)
+
+- `M_Shoter_Trooper` (dark armour, takes the mannequin slot textures through `BaseTex/NormalTex/MRATex`) and `M_Shoter_TeamRim` (additive fresnel overlay, `TeamColor`, `RimStrength`) are built by `shoter_materials.py`.
+- Kit pieces live in `Source/ShoterAAA/Core/ShoterCharacterKit.cpp` (tables `GetTrooperKit`, `GetZombieKit`), authored in the actor frame of the reference pose.
+- Screenshot dev switch: `Tools\Build\Screenshots.ps1 -Mode TDM|Zombies -Extra "-ShoterShotMirror"` takes 9 shots with third-person close-ups (self front, self back, nearest bot/zombie front and back, far shot, profile, ragdoll, far shot 2). `-ShoterKitLog` logs every bone of the mesh in the actor frame.
+
+## Dev switches: arms and reload screenshots
+
+Used with `Tools\Build\Screenshots.ps1 -Bots 0 -Extra "<switches>"` (all `!UE_BUILD_SHIPPING`; add `-benchmark -fps=60` so the captures do not stall the game clock).
+
+* `-ShoterShotBurst -ShoterShotBurstFrames=N -ShoterShotBurstGapMs=N`: consecutive frames of one scene.
+* `-ShoterShotNoFire`: never pull the trigger (hip views of the arms). With `-ShoterShotPitch=80` / `-80` it proves that no torso or shoulder is in view looking up/down; `-ShoterShotFireAds` gives the ADS sight picture.
+* `-ShoterShotReload`: fires one round, then reloads at the first burst frame (use e.g. `-ShoterShotBurstFrames=8 -ShoterShotBurstGapMs=240`): first-person reload sequence.
+* `-ShoterShotReload -ShoterShotMirror` (nearest bot) or `-ShoterShotMirror -ShoterShotMirrorSelf` (local pawn, with `-ShoterShotAzimuth=`/`-ShoterShotDistance=`): the same reload seen from the third-person camera.
+* `-ShoterShotWeapon=<PulsePistol|PulseRifle|Ripper|Scatter|Rail|PlasmaLauncher>` picks the weapon.
+
+New sounds (`Tools\Audio\generate_sfx.py`, imported by the audio step): `SFX_MagOut`, `SFX_MagIn`, `SFX_Charge`.

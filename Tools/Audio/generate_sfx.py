@@ -532,6 +532,61 @@ def sfx_reload():
     return [softclip(out, 1.1)]
 
 
+def sfx_mag_out():
+    """Magazine release: latch click, short slide, a small energy-cell decouple."""
+    rng = random.Random(1201)
+    out = zeros(nsamp(0.38))
+    put(out, noise_burst(rng, 0.01, 'hp', 2200.0, 0.7, 0.001, 0.9, 0.0001, 0.001), PRE_S)
+    put(out, tone(2000.0, 0.012, tau=0.003, amp=0.35, attack=0.0001), PRE_S)
+    k = nsamp(0.16)
+    slide = biquad(white(k, rng), 'bp', sweep_exp(2600.0, 900.0, k), 1.4)
+    put(out, mul(slide, envelope(k, 0.015, None, 0.03)), 0.04, 0.4)
+    # decoupling thunk + falling electric chirp
+    put(out, tone(decay_freq(160.0, 85.0, 0.03, nsamp(0.2)), tau=0.04, amp=0.7, attack=0.0005), 0.17)
+    k = nsamp(0.15)
+    chirp, _ = osc('sine', sweep_exp(1500.0, 420.0, k), k)
+    put(out, mul(chirp, envelope(k, 0.005, 0.05, 0.03)), 0.17, 0.25)
+    return [softclip(out, 1.1)]
+
+
+def sfx_mag_in():
+    """Fresh cell seated: slide, solid clunk, rising power-up and a latch click."""
+    rng = random.Random(1202)
+    out = zeros(nsamp(0.42))
+    k = nsamp(0.14)
+    slide = biquad(white(k, rng), 'bp', sweep_exp(900.0, 2600.0, k), 1.4)
+    put(out, mul(slide, envelope(k, 0.02, None, 0.02)), PRE_S, 0.4)
+    put(out, tone(decay_freq(190.0, 95.0, 0.02, nsamp(0.25)), tau=0.05, amp=0.95, attack=0.0005), 0.15)
+    k = nsamp(0.1)
+    thud = biquad(white(k, rng), 'lp', 900.0, 0.7)
+    put(out, mul(thud, envelope(k, 0.0005, 0.02, 0.01)), 0.15, 0.45)
+    k = nsamp(0.2)
+    s1, _ = osc('sine', sweep_exp(500.0, 1700.0, k), k)
+    put(out, mul(s1, envelope(k, 0.03, 0.08, 0.05)), 0.17, 0.22)
+    put(out, noise_burst(rng, 0.01, 'hp', 2800.0, 0.7, 0.0007, 0.7, 0.0001, 0.001), 0.3)
+    put(out, tone(1600.0, 0.012, tau=0.003, amp=0.4, attack=0.0001), 0.3)
+    return [softclip(out, 1.1)]
+
+
+def sfx_charge():
+    """Charging handle / slide rack: scrape back, spring, sharp slap forward."""
+    rng = random.Random(1203)
+    out = zeros(nsamp(0.30))
+    k = nsamp(0.11)
+    scrape = biquad(white(k, rng), 'bp', sweep_exp(1200.0, 3200.0, k), 1.8)
+    put(out, mul(scrape, envelope(k, 0.01, None, 0.02)), PRE_S, 0.45)
+    # spring buzz
+    k = nsamp(0.08)
+    buzz = biquad(white(k, rng), 'bp', 4200.0, 4.0)
+    am = [0.5 + 0.5 * math.sin(TAU * 90.0 * i / SR) for i in range(k)]
+    put(out, mul(mul(buzz, am), envelope(k, 0.01, None, 0.02)), 0.07, 0.3)
+    # forward slap
+    put(out, noise_burst(rng, 0.012, 'hp', 1800.0, 0.7, 0.002, 1.0, 0.0001, 0.001), 0.17)
+    put(out, tone(decay_freq(320.0, 130.0, 0.02, nsamp(0.12)), tau=0.03, amp=0.8, attack=0.0004), 0.17)
+    put(out, tone(2400.0, 0.01, tau=0.003, amp=0.4, attack=0.0001), 0.175)
+    return [softclip(out, 1.1)]
+
+
 def sfx_dry_fire():
     rng = random.Random(1109)
     out = zeros(nsamp(0.12))
@@ -1108,6 +1163,9 @@ SOUNDS = [  # (file stem, duration in seconds, renderer)
     ("SFX_Plasma_Fire", 0.55, sfx_plasma_fire),
     ("SFX_Explosion", 1.80, sfx_explosion),
     ("SFX_Reload", 1.10, sfx_reload),
+    ("SFX_MagOut", 0.38, sfx_mag_out),
+    ("SFX_MagIn", 0.42, sfx_mag_in),
+    ("SFX_Charge", 0.30, sfx_charge),
     ("SFX_DryFire", 0.12, sfx_dry_fire),
     ("SFX_WeaponEquip", 0.35, sfx_weapon_equip),
     ("SFX_Grenade_Throw", 0.30, sfx_grenade_throw),

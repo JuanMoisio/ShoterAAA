@@ -37,7 +37,14 @@ void AShoterPlayerCameraManager::UpdateViewTarget(FTViewTarget& OutVT, float Del
 		}
 	}
 	SprintFOVKick = FMath::FInterpTo(SprintFOVKick, SprintKick, DeltaTime, 8.f);
-	OutVT.POV.FOV = TargetFOV + SprintFOVKick;
+
+	// Every FOV in the game is authored as the horizontal FOV at 16:9; widen it for wider viewports (Hor+).
+	const float Aspect = GetViewportAspect();
+	OutVT.POV.FOV = ConvertHorPlusFOV(TargetFOV + SprintFOVKick, Aspect);
+	if (OutVT.POV.bUseFirstPersonParameters)
+	{
+		OutVT.POV.FirstPersonFOV = ConvertHorPlusFOV(OutVT.POV.FirstPersonFOV, Aspect);
+	}
 
 	// --- Death cam: pull back from where we died and look at the killer ---
 	if (bDeathCam)
@@ -63,7 +70,7 @@ void AShoterPlayerCameraManager::UpdateViewTarget(FTViewTarget& OutVT, float Del
 		const float Blend = FMath::InterpEaseOut(0.f, 1.f, FMath::Clamp(Elapsed / 0.7f, 0.f, 1.f), 2.f);
 		OutVT.POV.Location = FMath::Lerp(Eye, CameraLocation, Blend);
 		OutVT.POV.Rotation = (Focus + FVector(0.f, 0.f, 40.f) - OutVT.POV.Location).Rotation();
-		OutVT.POV.FOV = UserFOV;
+		OutVT.POV.FOV = ConvertHorPlusFOV(UserFOV, Aspect);
 	}
 
 	// --- Trauma shake (explosions, heavy weapons, taking damage) ---
@@ -77,6 +84,29 @@ void AShoterPlayerCameraManager::UpdateViewTarget(FTViewTarget& OutVT, float Del
 		OutVT.POV.Rotation.Roll += 3.5f * Shake * FMath::PerlinNoise1D(ShakeTime * Frequency + 71.f);
 		Trauma = FMath::Max(0.f, Trauma - DeltaTime * 1.5f);
 	}
+}
+
+float AShoterPlayerCameraManager::ConvertHorPlusFOV(float ReferenceFOVDegrees, float Aspect)
+{
+	constexpr float ReferenceAspect = 16.f / 9.f;
+	if (Aspect <= ReferenceAspect + KINDA_SMALL_NUMBER)
+	{
+		return ReferenceFOVDegrees;
+	}
+	const float HalfRef = FMath::DegreesToRadians(FMath::Clamp(ReferenceFOVDegrees, 1.f, 170.f) * 0.5f);
+	const float Actual = FMath::RadiansToDegrees(2.f * FMath::Atan(FMath::Tan(HalfRef) * Aspect / ReferenceAspect));
+	return FMath::Min(Actual, FMath::Max(ReferenceFOVDegrees, 150.f));
+}
+
+float AShoterPlayerCameraManager::GetViewportAspect() const
+{
+	int32 SizeX = 0;
+	int32 SizeY = 0;
+	if (PCOwner)
+	{
+		PCOwner->GetViewportSize(SizeX, SizeY);
+	}
+	return (SizeX > 0 && SizeY > 0) ? static_cast<float>(SizeX) / static_cast<float>(SizeY) : 16.f / 9.f;
 }
 
 void AShoterPlayerCameraManager::AddTrauma(float Amount)

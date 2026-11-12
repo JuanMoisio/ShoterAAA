@@ -78,7 +78,8 @@ bool UShoterGameInstance::TickAutoShots(float DeltaTime)
 	// Give shaders and the match time to settle, then one shot every few seconds.
 	constexpr float FirstShotTime = 14.f;
 	constexpr float ShotInterval = 2.5f;
-	constexpr int32 NumShots = 6;
+	// -ShoterShotMirror adds third-person character close-ups (see AShoterPlayerController::DebugAutoShotStep).
+	const int32 NumShots = FParse::Param(FCommandLine::Get(), TEXT("ShoterShotTeams")) ? 4 : (FParse::Param(FCommandLine::Get(), TEXT("ShoterShotMirror")) || FParse::Param(FCommandLine::Get(), TEXT("ShoterShotOverview"))) ? 9 : 6;
 
 #if WITH_EDITOR
 	// Running from the editor build: wait until material shaders are compiled, otherwise shots show placeholder materials.
@@ -89,6 +90,47 @@ bool UShoterGameInstance::TickAutoShots(float DeltaTime)
 #endif
 
 	AutoShotTimer += DeltaTime;
+
+	// -ShoterShotBurst: instead of the usual series, set the scene up once and capture consecutive frames while firing
+	// (-ShoterShotBurstFrames=N, default 10; -ShoterShotBurstGapMs=N minimum time between captures, default 0).
+	if (FParse::Param(FCommandLine::Get(), TEXT("ShoterShotBurst")))
+	{
+		int32 BurstFrames = 10;
+		FParse::Value(FCommandLine::Get(), TEXT("ShoterShotBurstFrames="), BurstFrames);
+		float GapMs = 0.f;
+		FParse::Value(FCommandLine::Get(), TEXT("ShoterShotBurstGapMs="), GapMs);
+		AShoterPlayerController* PC = Cast<AShoterPlayerController>(GetFirstLocalPlayerController(World));
+		if (PC && !bAutoShotPrepared && AutoShotTimer >= FirstShotTime - 1.f)
+		{
+			bAutoShotPrepared = true;
+			PC->DebugAutoShotStep(0);
+		}
+		if (PC && AutoShotIndex == 0 && AutoShotTimer >= FirstShotTime && !bBurstStarted)
+		{
+			bBurstStarted = true;
+			BurstStartTime = AutoShotTimer;
+			PC->DebugAutoShotStep(200);
+		}
+		if (PC && bBurstStarted && AutoShotTimer >= BurstStartTime + 0.5f && AutoShotIndex < BurstFrames)
+		{
+			PC->DebugAutoShotStep(201);
+			if (!FScreenshotRequest::IsScreenshotRequested() && (AutoShotTimer - LastBurstShotTime) * 1000.f >= GapMs)
+			{
+				LastBurstShotTime = AutoShotTimer;
+				const FString ShotPath = FPaths::ProjectSavedDir() / FString::Printf(TEXT("Screenshots/Shoter/AutoShot_%02d.png"), AutoShotIndex + 1);
+				FScreenshotRequest::RequestScreenshot(ShotPath, true, false);
+				++AutoShotIndex;
+				BurstEndTime = AutoShotTimer;
+			}
+		}
+		if (AutoShotIndex >= BurstFrames && AutoShotTimer >= BurstEndTime + 1.5f)
+		{
+			GEngine->Exec(World, TEXT("quit"));
+			return false;
+		}
+		return true;
+	}
+
 	const float NextShotTime = FirstShotTime + AutoShotIndex * ShotInterval;
 
 	if (AutoShotIndex < NumShots && !bAutoShotPrepared && AutoShotTimer >= NextShotTime - 0.7f)
@@ -581,6 +623,11 @@ void UShoterGameInstance::LoadSettings()
 	if (UShoterSaveGame* Save = Cast<UShoterSaveGame>(UGameplayStatics::LoadGameFromSlot(UShoterSaveGame::SlotName, 0)))
 	{
 		UserSettings = Save->Settings;
+		if (Save->Version < 2)
+		{
+			// v1 stored a flat aim multiplier (0.7); v2 is relative to the zoom, where 1.0 is the neutral value.
+			UserSettings.AimSensitivityScale = 1.f;
+		}
 	}
 	else
 	{

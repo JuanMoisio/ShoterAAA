@@ -7,8 +7,10 @@
 #include "Player/ShoterPlayerCameraManager.h"
 #include "AI/ShoterZombie.h"
 #include "Core/ShoterFX.h"
+#include "Core/ShoterFXPool.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/SceneComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/World.h"
@@ -118,6 +120,14 @@ void AShoterWeapon::Destroyed()
 			Part->DestroyComponent();
 		}
 	}
+	if (FirstPersonMagRoot)
+	{
+		FirstPersonMagRoot->DestroyComponent();
+	}
+	if (ThirdPersonMagRoot)
+	{
+		ThirdPersonMagRoot->DestroyComponent();
+	}
 	Super::Destroyed();
 }
 
@@ -128,6 +138,11 @@ void AShoterWeapon::Tick(float DeltaSeconds)
 	SpreadBloom = FMath::FInterpConstantTo(SpreadBloom, 0.f, DeltaSeconds, Stats.BloomRecovery);
 	KickOffset = FMath::VInterpTo(KickOffset, FVector::ZeroVector, DeltaSeconds, 14.f);
 	KickRotation = FMath::RInterpTo(KickRotation, FRotator::ZeroRotator, DeltaSeconds, 12.f);
+
+	if (bReloading || bReloadVisualsActive)
+	{
+		UpdateReloadVisuals();
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -144,24 +159,36 @@ void AShoterWeapon::BuildModel(USceneComponent* Parent, TArray<TObjectPtr<UStati
 
 	if (PartMaterials.Num() == 0)
 	{
-		PartMaterials.SetNum(4);
+		PartMaterials.SetNum(5);
 		PartMaterials[static_cast<int32>(EShoterPartMaterial::Body)] = Assets->MakeSurfaceMaterial(this, Stats.BodyColor, 0.75f, 0.32f);
 		PartMaterials[static_cast<int32>(EShoterPartMaterial::Dark)] = Assets->MakeSurfaceMaterial(this, FLinearColor(0.025f, 0.027f, 0.03f), 0.9f, 0.45f);
 		PartMaterials[static_cast<int32>(EShoterPartMaterial::Accent)] = Assets->MakeSurfaceMaterial(this, Stats.AccentColor, 0.6f, 0.3f);
 		PartMaterials[static_cast<int32>(EShoterPartMaterial::Glow)] = Assets->MakeSurfaceMaterial(this, Stats.EnergyColor * 0.2f, 0.f, 0.3f, Stats.EnergyColor, 12.f);
+		PartMaterials[static_cast<int32>(EShoterPartMaterial::Reticle)] = Assets->MakeSurfaceMaterial(this, Stats.EnergyColor * 0.1f, 0.f, 0.3f, Stats.EnergyColor, 10.f);
 	}
+	if (FirstPersonPartMaterials.Num() == 0)
+	{
+		// Right next to the camera the light body and the neon parts would bloom to white, so tone them down.
+		FirstPersonPartMaterials.SetNum(5);
+		FirstPersonPartMaterials[static_cast<int32>(EShoterPartMaterial::Body)] = Assets->MakeSurfaceMaterial(this, Stats.BodyColor * 0.4f, 0.75f, 0.4f);
+		FirstPersonPartMaterials[static_cast<int32>(EShoterPartMaterial::Dark)] = PartMaterials[static_cast<int32>(EShoterPartMaterial::Dark)];
+		FirstPersonPartMaterials[static_cast<int32>(EShoterPartMaterial::Accent)] = Assets->MakeSurfaceMaterial(this, Stats.AccentColor * 0.8f, 0.6f, 0.35f);
+		FirstPersonPartMaterials[static_cast<int32>(EShoterPartMaterial::Glow)] = Assets->MakeSurfaceMaterial(this, Stats.EnergyColor * 0.1f, 0.f, 0.3f, Stats.EnergyColor, 3.5f);
+		FirstPersonPartMaterials[static_cast<int32>(EShoterPartMaterial::Reticle)] = Assets->MakeSurfaceMaterial(this, Stats.EnergyColor * 0.1f, 0.f, 0.3f, Stats.EnergyColor, 4.f);
+	}
+	const TArray<TObjectPtr<UMaterialInstanceDynamic>>& Materials = bFirstPerson ? FirstPersonPartMaterials : PartMaterials;
 
-	for (const FShoterWeaponPart& Part : Parts)
+	auto MakePart = [&](const FShoterWeaponPart& Part, USceneComponent* Attach, UMaterialInterface* Material)
 	{
 		UStaticMeshComponent* Mesh = NewObject<UStaticMeshComponent>(this);
 		Mesh->SetStaticMesh(Assets->GetShape(Part.Shape));
-		Mesh->SetupAttachment(Parent);
+		Mesh->SetupAttachment(Attach);
 		Mesh->SetRelativeLocation(Part.Location);
 		Mesh->SetRelativeRotation(Part.Rotation);
 		Mesh->SetRelativeScale3D(Part.Size / 100.f);
 		Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Mesh->SetGenerateOverlapEvents(false);
-		Mesh->SetMaterial(0, PartMaterials[static_cast<int32>(Part.Material)]);
+		Mesh->SetMaterial(0, Material);
 		if (bFirstPerson)
 		{
 			Mesh->SetOnlyOwnerSee(true);
@@ -176,6 +203,29 @@ void AShoterWeapon::BuildModel(USceneComponent* Parent, TArray<TObjectPtr<UStati
 		Mesh->SetVisibility(bIsEquipped);
 		Mesh->RegisterComponent();
 		OutParts.Add(Mesh);
+	};
+
+	TArray<FShoterWeaponPart> AllParts = Parts;
+	AllParts.Append(SightParts);
+	for (const FShoterWeaponPart& Part : AllParts)
+	{
+		MakePart(Part, Parent, Materials[static_cast<int32>(Part.Material)]);
+	}
+
+	// Magazine: its own root (moved by the reload choreography) and its own glow material (so a fresh cell can burn brighter).
+	if (MagParts.Num() > 0)
+	{
+		USceneComponent* MagRoot = NewObject<USceneComponent>(this);
+		MagRoot->SetupAttachment(Parent);
+		MagRoot->RegisterComponent();
+		UMaterialInstanceDynamic* MagGlow = Assets->MakeSurfaceMaterial(this, Stats.EnergyColor * 0.1f, 0.f, 0.3f, Stats.EnergyColor, bFirstPerson ? 3.5f : 12.f);
+		(bFirstPerson ? FirstPersonMagRoot : ThirdPersonMagRoot) = MagRoot;
+		(bFirstPerson ? FirstPersonMagGlow : ThirdPersonMagGlow) = MagGlow;
+		for (const FShoterWeaponPart& Part : MagParts)
+		{
+			UMaterialInterface* Material = Part.Material == EShoterPartMaterial::Glow ? static_cast<UMaterialInterface*>(MagGlow) : Materials[static_cast<int32>(Part.Material)];
+			MakePart(Part, MagRoot, Material);
+		}
 	}
 }
 
@@ -695,10 +745,22 @@ void AShoterWeapon::MulticastFireEffects_Implementation(FVector_NetQuantize Orig
 	PlayShotEffects(Origin, ImpactPoints, FleshMask);
 }
 
+bool AShoterWeapon::IsFirstPersonView() const
+{
+	if (!OwningCharacter || !OwningCharacter->IsPlayerControlled() || !IsOwnerLocallyControlled())
+	{
+		return false;
+	}
+	const APlayerController* PC = Cast<APlayerController>(OwningCharacter->GetController());
+	// Debug/mirror/death cameras look at the pawn from outside: there the third-person model is what is on screen.
+	return PC && PC->GetViewTarget() == OwningCharacter && PC->PlayerCameraManager && PC->PlayerCameraManager->GetCameraCacheView().bUseFirstPersonParameters;
+}
+
 void AShoterWeapon::PlayShotEffects(const FVector& Origin, const TArray<FVector_NetQuantize>& ImpactPoints, uint32 FleshMask)
 {
 	UWorld* World = GetWorld();
 	const bool bLocalView = OwningCharacter && OwningCharacter->IsPlayerControlled() && IsOwnerLocallyControlled();
+	const bool bFirstPersonView = IsFirstPersonView();
 	const FVector Muzzle = GetMuzzleLocation();
 	const float Pitch = FMath::FRandRange(0.96f, 1.04f);
 
@@ -715,26 +777,128 @@ void AShoterWeapon::PlayShotEffects(const FVector& Origin, const TArray<FVector_
 		: (Stats.Type == EShoterWeaponType::Sniper ? 1.8f : 1.f);
 	FShoterFX::SpawnMuzzleFlash(bLocalView ? FirstPersonRoot.Get() : ThirdPersonRoot.Get(), Stats.MuzzleOffset, Stats.EnergyColor, FlashScale, bLocalView, !bLocalView);
 
+	// Bolts leave from where the muzzle is actually drawn: for the local first-person model that is the raw muzzle pushed through the
+	// viewmodel FOV transform (the model is rendered with its own FOV and scale, so its raw position is not where it appears).
+	FVector VisualMuzzle = Muzzle;
+	if (bFirstPersonView)
+	{
+		VisualMuzzle = UShoterFXPool::ToFirstPersonSpace(this, Muzzle);
+	}
+	else if (bLocalView && ThirdPersonRoot)
+	{
+		VisualMuzzle = ThirdPersonRoot->GetComponentTransform().TransformPosition(Stats.MuzzleOffset);
+	}
+	const float AimAlpha = (bFirstPersonView && OwningCharacter) ? OwningCharacter->GetAimAlpha() : 0.f;
+	UShoterFXPool* Pool = UShoterFXPool::Get(this);
+
 	for (int32 Index = 0; Index < ImpactPoints.Num(); ++Index)
 	{
 		const FVector End = ImpactPoints[Index];
 		const bool bFlesh = (FleshMask & (1u << Index)) != 0;
+		// Shots that reached max range hit nothing.
+		const bool bHit = FVector::DistSquared(Origin, End) < FMath::Square(Stats.Range * 0.98f);
+		const float Distance = FVector::Dist(VisualMuzzle, End);
+		const FVector ImpactNormal = (Origin - End).GetSafeNormal();
+
+		// The rail beam is instant; very close hits have no visible flight. Everything else lands when the bolt arrives.
+		const bool bImpactNow = !Pool || Stats.bBeamTracer || Distance < 300.f;
+		if (bHit && bImpactNow)
+		{
+			FShoterFX::SpawnImpact(World, End, ImpactNormal, Stats.EnergyColor, bFlesh);
+		}
+		if (!Pool)
+		{
+			continue;
+		}
 
 		if (Stats.bBeamTracer)
 		{
-			FShoterFX::SpawnBeam(World, Muzzle, End, Stats.EnergyColor, Stats.TracerWidth * 2.f, 0.7f);
+			FShoterBeamParams Beam;
+			Beam.Start = VisualMuzzle;
+			Beam.End = End;
+			Beam.Color = Stats.EnergyColor;
+			Beam.Width = Stats.TracerWidth * 2.2f * (bFirstPersonView ? FMath::Lerp(0.6f, 0.4f, AimAlpha) : 1.f);
+			Beam.Intensity = bFirstPersonView ? 7.f : 14.f;
+			Beam.Lifetime = 0.9f;
+			Pool->SpawnBeam(Beam);
 		}
-		else if (Index == 0 || FMath::FRand() < 0.5f)
+		else if (Distance >= 250.f)
 		{
-			FShoterFX::SpawnTracer(World, Muzzle, End, Stats.EnergyColor, Stats.TracerWidth);
+			const bool bPellet = ImpactPoints.Num() > 1;
+			FShoterBoltParams Bolt;
+			Bolt.Start = VisualMuzzle;
+			Bolt.End = End;
+			Bolt.Color = Stats.EnergyColor;
+			Bolt.Speed = Stats.BoltSpeed * FMath::FRandRange(0.94f, 1.06f);
+			Bolt.Length = Stats.BoltLength * (bPellet ? 0.55f : 1.f);
+			Bolt.Width = Stats.TracerWidth * (bPellet ? 1.2f : 1.7f) * (bFirstPersonView ? FMath::Lerp(1.f, 0.6f, AimAlpha) : 1.f);
+			Bolt.Intensity = bFirstPersonView ? 5.f : 14.f;
+			Bolt.bImpact = bHit && !bImpactNow;
+			Bolt.ImpactNormal = ImpactNormal;
+			Bolt.bImpactFlesh = bFlesh;
+			Pool->SpawnBolt(Bolt);
 		}
-
-		// Shots that reached max range hit nothing.
-		if (FVector::DistSquared(Origin, End) < FMath::Square(Stats.Range * 0.98f))
+		else if (bHit && !bImpactNow)
 		{
-			FShoterFX::SpawnImpact(World, End, (Origin - End).GetSafeNormal(), Stats.EnergyColor, bFlesh);
+			FShoterFX::SpawnImpact(World, End, ImpactNormal, Stats.EnergyColor, bFlesh);
 		}
 	}
+
+	EjectCasing(bFirstPersonView);
+}
+
+void AShoterWeapon::EjectCasing(bool bFirstPersonView)
+{
+	UShoterFXPool* Pool = UShoterFXPool::Get(this);
+	const USceneComponent* Root = bFirstPersonView ? FirstPersonRoot.Get() : ThirdPersonRoot.Get();
+	if (!Pool || !Root || !OwningCharacter)
+	{
+		return;
+	}
+	const float Aim = bFirstPersonView ? OwningCharacter->GetAimAlpha() : 0.f;
+	if (bFirstPersonView && Stats.bHasScope && Aim > 0.5f)
+	{
+		return;		// looking through the scope: the model is hidden
+	}
+
+	const FTransform ModelTransform = Root->GetComponentTransform();
+	FVector Port = ModelTransform.TransformPosition(Stats.EjectOffset);
+	if (bFirstPersonView)
+	{
+		Port = UShoterFXPool::ToFirstPersonSpace(this, Port);
+	}
+	else if (const APlayerController* Viewer = GetWorld()->GetFirstPlayerController())
+	{
+		// Too small to see from afar.
+		if (Viewer->PlayerCameraManager && FVector::DistSquared(Viewer->PlayerCameraManager->GetCameraLocation(), Port) > FMath::Square(3000.f))
+		{
+			return;
+		}
+	}
+
+	// Out to the right, up and a little back; while aiming it stays low and close so it never crosses the sight picture.
+	const FVector LocalVelocity(FMath::FRandRange(-90.f, -15.f) , FMath::FRandRange(150.f, 240.f) * FMath::Lerp(1.f, 0.8f, Aim), FMath::FRandRange(70.f, 150.f) * FMath::Lerp(1.f, 0.4f, Aim));
+	FVector Velocity = ModelTransform.TransformVectorNoScale(LocalVelocity) + OwningCharacter->GetVelocity().GetClampedToMaxSize(600.f) * 0.5f;
+
+	FShoterDebrisParams Casing;
+	Casing.Shape = EShoterShape::Cylinder;
+	Casing.Size = FVector(Stats.CasingDiameter, Stats.CasingDiameter, Stats.CasingLength);
+	Casing.BaseColor = FLinearColor(0.1f, 0.1f, 0.11f);
+	Casing.Metallic = 0.8f;
+	Casing.Roughness = 0.35f;
+	Casing.GlowColor = Stats.EnergyColor;
+	Casing.GlowStrength = bFirstPersonView ? 5.f : 9.f;
+	Casing.GlowTime = 0.6f;
+	Casing.Location = Port;
+	Casing.Rotation = FRotator(FMath::FRandRange(-180.f, 180.f), FMath::FRandRange(-180.f, 180.f), FMath::FRandRange(-180.f, 180.f));
+	Casing.Velocity = Velocity;
+	const float Spin = FMath::FRandRange(500.f, 1100.f);
+	Casing.AngularVelocity = FMath::VRand() * Spin;
+	Casing.Lifetime = 2.5f;
+	Casing.FadeTime = 0.5f;
+	Casing.MaxBounces = 1;
+	Casing.BounceSound = TEXT("Grenade_Bounce");
+	Pool->SpawnDebris(Casing);
 }
 
 FVector AShoterWeapon::GetMuzzleLocation() const
@@ -764,10 +928,12 @@ void AShoterWeapon::ApplyLocalFireFeedback()
 	}
 
 	const float AimScale = FMath::Lerp(1.f, Stats.AimRecoilScale, OwningCharacter->GetAimAlpha());
-	OwningCharacter->AddRecoil(Stats.RecoilPitch * AimScale * FMath::FRandRange(0.85f, 1.15f), Stats.RecoilYaw * AimScale * FMath::FRandRange(-1.f, 1.f));
+	OwningCharacter->AddRecoil(Stats.RecoilPitch * AimScale * FMath::FRandRange(0.85f, 1.15f), Stats.RecoilYaw * 0.6f * AimScale * FMath::FRandRange(-1.f, 1.f));
 
+	// The viewmodel barely rotates while aiming so the gun never swings over the target.
+	const float ViewmodelKickScale = FMath::Lerp(1.f, 0.2f, OwningCharacter->GetAimAlpha());
 	KickOffset.X -= Stats.KickBack * AimScale;
-	KickRotation.Pitch += Stats.RecoilPitch * 1.5f * AimScale;
+	KickRotation.Pitch += Stats.RecoilPitch * 1.5f * AimScale * ViewmodelKickScale;
 
 	if (const AController* Controller = OwningCharacter->GetController())
 	{
@@ -791,12 +957,12 @@ float AShoterWeapon::GetCurrentSpread() const
 	if (Character)
 	{
 		const float SpeedAlpha = FMath::Clamp(Character->GetVelocity().Size2D() / 520.f, 0.f, 1.f);
-		Spread += Stats.MovingSpread * SpeedAlpha * FMath::Lerp(1.f, 0.4f, Aim);
+		Spread += Stats.MovingSpread * 0.4f * SpeedAlpha * FMath::Lerp(1.f, 0.4f, Aim);
 		if (const UCharacterMovementComponent* Movement = Character->GetCharacterMovement())
 		{
 			if (Movement->IsFalling())
 			{
-				Spread += Stats.AirSpread;
+				Spread += Stats.AirSpread * 0.5f;
 			}
 		}
 		if (Character->bIsCrouched)
@@ -805,6 +971,103 @@ float AShoterWeapon::GetCurrentSpread() const
 		}
 	}
 	return FMath::Max(Spread, 0.f);
+}
+
+FVector AShoterWeapon::GetAimViewOffset(float ForwardOffset) const
+{
+	if (bAimViewOffsetCached)
+	{
+		return CachedAimViewOffset;
+	}
+
+	// Weapons with iron sights: the top centre of the front post goes exactly on the view axis (Y = Z = 0) and the
+	// rear sight sits a fixed distance from the eye. Pushed further out only if needed to keep the gun narrow.
+	if (!Stats.SightOffset.IsNearlyZero())
+	{
+		constexpr float RearSightDistance = 40.f;
+		constexpr float MaxHalfWidthTan = 0.17f;
+		constexpr float MinEyeDistance = 14.f;
+		float RearX = TNumericLimits<float>::Max();
+		for (const FShoterWeaponPart& Part : SightParts)
+		{
+			RearX = FMath::Min(RearX, Part.Location.X - Part.Size.X * 0.5f);
+		}
+		if (RearX == TNumericLimits<float>::Max())
+		{
+			RearX = Stats.SightOffset.X;
+		}
+		float ViewX = RearSightDistance - RearX;
+		for (const FShoterWeaponPart& Part : Parts)
+		{
+			const FVector Extent = Part.Rotation.Quaternion().RotateVector(Part.Size * 0.5f).GetAbs();
+			ViewX = FMath::Max(ViewX, (FMath::Abs(Part.Location.Y) + Extent.Y) / MaxHalfWidthTan - (Part.Location.X - Extent.X));
+			ViewX = FMath::Max(ViewX, MinEyeDistance - (Part.Location.X - Extent.X));
+		}
+		CachedAimViewOffset = FVector(ViewX, -Stats.SightOffset.Y, -Stats.SightOffset.Z);
+		bAimViewOffsetCached = true;
+		return CachedAimViewOffset;
+	}
+
+	// Collect the extreme points of every part in weapon space (cylinders sampled around their rim, the rest as boxes).
+	TArray<FVector> Points;
+	for (const FShoterWeaponPart& Part : Parts)
+	{
+		const FQuat Rotation = Part.Rotation.Quaternion();
+		const FVector Half = Part.Size * 0.5f;
+		if (Part.Shape == EShoterShape::Cylinder)
+		{
+			for (int32 Step = 0; Step < 8; ++Step)
+			{
+				const float Angle = 2.f * PI * static_cast<float>(Step) / 8.f;
+				for (const float Sign : { -1.f, 1.f })
+				{
+					Points.Add(Part.Location + Rotation.RotateVector(FVector(Half.X * FMath::Cos(Angle), Half.Y * FMath::Sin(Angle), Half.Z * Sign)));
+				}
+			}
+		}
+		else
+		{
+			for (int32 Corner = 0; Corner < 8; ++Corner)
+			{
+				const FVector Local((Corner & 1) ? Half.X : -Half.X, (Corner & 2) ? Half.Y : -Half.Y, (Corner & 4) ? Half.Z : -Half.Z);
+				Points.Add(Part.Location + Rotation.RotateVector(Local));
+			}
+		}
+	}
+	if (Points.Num() == 0)
+	{
+		CachedAimViewOffset = FVector(Stats.AimOffset.X + ForwardOffset, 0.f, Stats.AimOffset.Z);
+		bAimViewOffsetCached = true;
+		return CachedAimViewOffset;
+	}
+
+	// Angular limits measured against the 16:9 viewmodel FOV (vertical half-angle tangent; Hor+ keeps it for wider screens).
+	const float TanHalfHorizontal = FMath::Tan(FMath::DegreesToRadians(AShoterCharacter::ViewmodelFOV * 0.5f));
+	const float TanHalfVertical = TanHalfHorizontal / (16.f / 9.f);
+	constexpr float ClearanceNdc = 0.15f;		// highest solid point stays at least this far below the eye line (NDC, 1 = half the screen height)
+	constexpr float MaxHalfWidthNdc = 0.115f;	// no point further from the centre line than this fraction of the half-width (x2 = ~12% of screen width)
+	constexpr float MinEyeDistance = 14.f;
+	constexpr float MinAimX = 24.f;				// never closer than this before the constant forward offset
+
+	const float ClearanceTan = ClearanceNdc * TanHalfVertical;
+	const float MaxHalfWidthTan = MaxHalfWidthNdc * TanHalfHorizontal;
+
+	float ViewX = FMath::Max(Stats.AimOffset.X, MinAimX) + ForwardOffset;
+	for (const FVector& Point : Points)
+	{
+		ViewX = FMath::Max(ViewX, FMath::Abs(Point.Y) / MaxHalfWidthTan - Point.X);
+		ViewX = FMath::Max(ViewX, MinEyeDistance - Point.X);
+	}
+
+	float ViewZ = TNumericLimits<float>::Max();
+	for (const FVector& Point : Points)
+	{
+		ViewZ = FMath::Min(ViewZ, -ClearanceTan * (Point.X + ViewX) - Point.Z);
+	}
+
+	CachedAimViewOffset = FVector(ViewX, 0.f, ViewZ);
+	bAimViewOffsetCached = true;
+	return CachedAimViewOffset;
 }
 
 float AShoterWeapon::GetTimeSinceLastFire() const
@@ -837,14 +1100,7 @@ void AShoterWeapon::StartReload()
 	GetWorldTimerManager().ClearTimer(TimerHandle_Refire);
 	GetWorldTimerManager().SetTimer(TimerHandle_Reload, this, &AShoterWeapon::FinishReload, Stats.ReloadTime, false);
 
-	if (IsOwnerLocallyControlled() && OwningCharacter->IsPlayerControlled())
-	{
-		UShoterAssets::PlaySound2D(this, Stats.ReloadSound, 0.8f);
-	}
-	else
-	{
-		UShoterAssets::PlaySoundAt(this, Stats.ReloadSound, GetActorLocation(), EShoterSoundRange::Short, 0.8f);
-	}
+	BeginReloadVisuals(0.f);
 }
 
 void AShoterWeapon::ServerStartReload_Implementation()
@@ -859,6 +1115,7 @@ void AShoterWeapon::FinishReload()
 		return;
 	}
 	bReloading = false;
+	ResetReloadVisuals();
 
 	// Same math on client and server; the server value replicates to the owner anyway.
 	const int32 Needed = Stats.MagSize - AmmoInClip;
@@ -879,14 +1136,21 @@ void AShoterWeapon::CancelReload()
 		bReloading = false;
 		GetWorldTimerManager().ClearTimer(TimerHandle_Reload);
 	}
+	ResetReloadVisuals();
 }
 
 void AShoterWeapon::OnRep_Reloading()
 {
+	// Simulated proxies learn about the reload from the replicated flag; the choreography is clock driven from here, so there is no
+	// per-frame traffic. A flag that arrives late starts the cosmetic reload part way through.
 	if (bReloading)
 	{
 		ReloadStartTime = GetWorld()->GetTimeSeconds();
-		UShoterAssets::PlaySoundAt(this, Stats.ReloadSound, GetActorLocation(), EShoterSoundRange::Short, 0.7f);
+		BeginReloadVisuals(0.f);
+	}
+	else
+	{
+		ResetReloadVisuals();
 	}
 }
 
@@ -897,6 +1161,379 @@ float AShoterWeapon::GetReloadProgress() const
 		return 0.f;
 	}
 	return FMath::Clamp((GetWorld()->GetTimeSeconds() - ReloadStartTime) / FMath::Max(Stats.ReloadTime, 0.01f), 0.f, 1.f);
+}
+
+// ---------------------------------------------------------------------------
+// Reload choreography (cosmetic, driven by the reload progress on every machine)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+	float SmoothStep01(float X)
+	{
+		X = FMath::Clamp(X, 0.f, 1.f);
+		return X * X * (3.f - 2.f * X);
+	}
+
+	float Segment(float P, float From, float To)
+	{
+		return To > From ? FMath::Clamp((P - From) / (To - From), 0.f, 1.f) : 1.f;
+	}
+}
+
+void AShoterWeapon::GetReloadFrame(FShoterReloadFrame& Out) const
+{
+	const FShoterReloadSpec& R = Stats.Reload;
+	Out = FShoterReloadFrame();
+	Out.LeftLocation = Stats.LeftGrip.Location;
+	Out.LeftRotation = Stats.LeftGrip.Rotation;
+	Out.LeftCurl = Stats.LeftGrip.Curl;
+	if (!bReloading)
+	{
+		return;
+	}
+
+	const float P = GetReloadProgress();
+	const FVector Rest = Stats.LeftGrip.Location;
+	const FVector MagDirection = R.MagOut.GetSafeNormal();
+	const FVector Grab = R.MagGrip;
+	const FVector Pulled = Grab + MagDirection * R.MagTravel;
+	const FVector Drop = Pulled + R.HandDrop;
+	const float TGrab = R.Grab;
+	const float TPull = FMath::Max(R.Pull, TGrab + 0.01f);
+	const float TAway = FMath::Max(R.Away, TPull + 0.01f);
+	const float TBack = FMath::Max(R.Back, TAway + 0.02f);
+	const float TSeat = FMath::Max(R.Seat, TBack + 0.01f);
+	const float TCharge = R.bCharge ? FMath::Max(R.Charge, TSeat + 0.04f) : TSeat;
+	const float TFresh = FMath::Lerp(TAway, TBack, 0.3f);
+	const float MagCurl = 0.9f;
+
+	FQuat RestRot = Stats.LeftGrip.Rotation.Quaternion();
+	const FQuat MagRot = R.MagHandRot.Quaternion();
+	auto SetRot = [&](const FQuat& A, const FQuat& B, float Alpha) { Out.LeftRotation = FQuat::Slerp(A, B, Alpha).Rotator(); };
+
+	if (P < TGrab)
+	{
+		const float S = SmoothStep01(P / TGrab);
+		Out.LeftLocation = FMath::Lerp(Rest, Grab, S);
+		SetRot(RestRot, MagRot, S);
+		Out.LeftCurl = FMath::Lerp(Stats.LeftGrip.Curl, MagCurl, S);
+	}
+	else if (P < TPull)
+	{
+		const float S = SmoothStep01(Segment(P, TGrab, TPull));
+		Out.LeftLocation = FMath::Lerp(Grab, Pulled, S);
+		Out.LeftRotation = R.MagHandRot;
+		Out.LeftCurl = MagCurl;
+		Out.MagOffset = MagDirection * R.MagTravel * S;
+	}
+	else if (P < TAway)
+	{
+		const float S = SmoothStep01(Segment(P, TPull, TAway));
+		Out.LeftLocation = FMath::Lerp(Pulled, Drop, S);
+		Out.LeftRotation = R.MagHandRot;
+		Out.LeftCurl = FMath::Lerp(MagCurl, 0.55f, S);
+		Out.bMagVisible = false;
+	}
+	else if (P < TBack)
+	{
+		// The hand waits below the screen, takes the fresh cell and comes back with it.
+		const float S = SmoothStep01(Segment(P, TFresh, TBack));
+		Out.LeftLocation = FMath::Lerp(Drop, Pulled, S);
+		Out.LeftRotation = R.MagHandRot;
+		Out.LeftCurl = MagCurl;
+		Out.bMagVisible = P >= TFresh;
+		Out.MagOffset = MagDirection * R.MagTravel + (Out.LeftLocation - Pulled);
+		Out.MagGlow = 1.8f;
+	}
+	else if (P < TSeat)
+	{
+		const float S = SmoothStep01(Segment(P, TBack, TSeat));
+		Out.LeftLocation = FMath::Lerp(Pulled, Grab, S);
+		Out.LeftRotation = R.MagHandRot;
+		Out.LeftCurl = MagCurl;
+		Out.MagOffset = MagDirection * R.MagTravel * (1.f - S);
+		Out.MagGlow = 1.8f;
+	}
+	else if (R.bCharge && P < TCharge)
+	{
+		// Rack the action: to the handle, pull back, let go.
+		const float U = Segment(P, TSeat, TCharge);
+		const FVector Handle = R.ChargeLocation;
+		const FVector Pull = Handle + FVector(-R.ChargeStroke, 0.f, 0.f);
+		const FQuat ChargeRot = R.ChargeRotation.Quaternion();
+		if (U < 0.3f)
+		{
+			const float S = SmoothStep01(U / 0.3f);
+			Out.LeftLocation = FMath::Lerp(Grab, Handle, S);
+			SetRot(MagRot, ChargeRot, S);
+			Out.LeftCurl = FMath::Lerp(MagCurl, 0.7f, S);
+		}
+		else if (U < 0.58f)
+		{
+			Out.LeftLocation = FMath::Lerp(Handle, Pull, SmoothStep01((U - 0.3f) / 0.28f));
+			Out.LeftRotation = R.ChargeRotation;
+			Out.LeftCurl = 0.8f;
+		}
+		else if (U < 0.72f)
+		{
+			Out.LeftLocation = FMath::Lerp(Pull, Handle, FMath::Clamp((U - 0.58f) / 0.14f, 0.f, 1.f));
+			Out.LeftRotation = R.ChargeRotation;
+			Out.LeftCurl = 0.8f;
+		}
+		else
+		{
+			const float S = SmoothStep01((U - 0.72f) / 0.28f);
+			Out.LeftLocation = FMath::Lerp(Handle, Rest, S);
+			SetRot(ChargeRot, RestRot, S);
+			Out.LeftCurl = FMath::Lerp(0.8f, Stats.LeftGrip.Curl, S);
+		}
+		Out.MagGlow = 1.3f;
+	}
+	else
+	{
+		const FVector From = R.bCharge ? R.ChargeLocation : Grab;
+		const FQuat FromRot = R.bCharge ? R.ChargeRotation.Quaternion() : MagRot;
+		const float S = SmoothStep01(Segment(P, TCharge, 1.f));
+		Out.LeftLocation = FMath::Lerp(From, Rest, S);
+		SetRot(FromRot, RestRot, S);
+		Out.LeftCurl = FMath::Lerp(R.bCharge ? 0.8f : MagCurl, Stats.LeftGrip.Curl, S);
+		Out.MagGlow = FMath::Lerp(1.3f, 1.f, S);
+	}
+
+	// A short flare right after the cell clicks home.
+	if (P >= TSeat)
+	{
+		const float Since = (P - TSeat) * Stats.ReloadTime;
+		Out.MagGlow *= 1.f + 2.2f * FMath::Exp(-Since * 7.f);
+	}
+
+	// Whole-gun tilt: in over the grab, held until the cell is seated, out while the hand goes back.
+	Out.Tilt = SmoothStep01(P / FMath::Max(TGrab, 0.05f)) * (1.f - SmoothStep01(Segment(P, TSeat, 1.f))) * R.TiltScale;
+	Out.LeftWeight = SmoothStep01(P / 0.12f) * (1.f - SmoothStep01((P - 0.9f) / 0.1f));
+}
+
+void AShoterWeapon::AddViewKick(const FVector& Offset, const FRotator& Rotation)
+{
+	KickOffset += Offset;
+	KickRotation += Rotation;
+}
+
+bool AShoterWeapon::GetThirdPersonModelTransform(FTransform& OutTransform) const
+{
+	const AShoterCharacter* Character = OwningCharacter;
+	const USkeletalMeshComponent* Body = Character ? Character->GetMesh() : nullptr;
+	static const FName GripSocket(TEXT("HandGrip_R"));
+	if (!Body || !Body->GetSkeletalMeshAsset() || !Body->DoesSocketExist(GripSocket))
+	{
+		return false;
+	}
+	const FTransform Socket = Body->GetSocketTransform(GripSocket);
+	FShoterReloadFrame Frame;
+	GetReloadFrame(Frame);
+	const FQuat Tilt = (FRotator(-9.f, 5.f, 14.f) * Frame.Tilt).Quaternion();
+	OutTransform = FTransform(Stats.ThirdPersonRotation.Quaternion() * Tilt, Stats.ThirdPersonOffset, FVector(Stats.ThirdPersonScale)) * Socket;
+	return true;
+}
+
+void AShoterWeapon::PlayReloadSound(FName Sound, float Volume)
+{
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+	if (IsFirstPersonView())
+	{
+		UShoterAssets::PlaySound2D(this, Sound, Volume);
+	}
+	else
+	{
+		// Heard by players within earshot (a pistol-sized sound, ~25 m).
+		FVector Location = GetActorLocation();
+		if (const USceneComponent* Root = ThirdPersonRoot.Get())
+		{
+			Location = Root->GetComponentLocation();
+		}
+		UShoterAssets::PlaySoundAt(this, Sound, Location, EShoterSoundRange::Short, Volume * 0.9f);
+	}
+}
+
+void AShoterWeapon::BeginReloadVisuals(float StartProgress)
+{
+	bReleaseDone = false;
+	bSeatDone = false;
+	bRackDone = false;
+	bReloadVisualsActive = true;
+	// Events behind the starting progress are skipped, not played in a burst.
+	if (StartProgress > Stats.Reload.Pull)
+	{
+		bReleaseDone = true;
+	}
+	if (StartProgress > Stats.Reload.Seat)
+	{
+		bSeatDone = true;
+	}
+}
+
+void AShoterWeapon::UpdateReloadVisuals()
+{
+	if (!bModelBuilt)
+	{
+		return;
+	}
+	if (!bReloading)
+	{
+		ResetReloadVisuals();
+		return;
+	}
+
+	const FShoterReloadSpec& R = Stats.Reload;
+	const float P = GetReloadProgress();
+	if (!bReleaseDone && P >= R.Pull)
+	{
+		bReleaseDone = true;
+		OnMagazineReleased();
+	}
+	if (!bSeatDone && P >= R.Seat)
+	{
+		bSeatDone = true;
+		OnMagazineSeated();
+	}
+	const float RackTime = R.Seat + 0.72f * (R.Charge - R.Seat);
+	if (R.bCharge && !bRackDone && P >= RackTime)
+	{
+		bRackDone = true;
+		OnActionRacked();
+	}
+
+	FShoterReloadFrame Frame;
+	GetReloadFrame(Frame);
+	if (ThirdPersonRoot && ThirdPersonRoot->GetAttachParent() && ThirdPersonRoot->GetAttachSocketName() != NAME_None)
+	{
+		ThirdPersonRoot->SetRelativeRotation(Stats.ThirdPersonRotation.Quaternion() * (FRotator(-9.f, 5.f, 14.f) * Frame.Tilt).Quaternion());
+	}
+	const FVector Scale = Frame.bMagVisible ? FVector::OneVector : FVector(0.0001f);
+	for (USceneComponent* MagRoot : { FirstPersonMagRoot.Get(), ThirdPersonMagRoot.Get() })
+	{
+		if (MagRoot)
+		{
+			MagRoot->SetRelativeLocation(Frame.MagOffset);
+			MagRoot->SetRelativeScale3D(Scale);
+		}
+	}
+	if (FirstPersonMagGlow)
+	{
+		FirstPersonMagGlow->SetScalarParameterValue(TEXT("EmissiveStrength"), 3.5f * Frame.MagGlow);
+	}
+	if (ThirdPersonMagGlow)
+	{
+		ThirdPersonMagGlow->SetScalarParameterValue(TEXT("EmissiveStrength"), 12.f * Frame.MagGlow);
+	}
+}
+
+void AShoterWeapon::ResetReloadVisuals()
+{
+	if (!bReloadVisualsActive)
+	{
+		return;
+	}
+	bReloadVisualsActive = false;
+	if (ThirdPersonRoot && ThirdPersonRoot->GetAttachSocketName() != NAME_None)
+	{
+		ThirdPersonRoot->SetRelativeRotation(Stats.ThirdPersonRotation);
+	}
+	for (USceneComponent* MagRoot : { FirstPersonMagRoot.Get(), ThirdPersonMagRoot.Get() })
+	{
+		if (MagRoot)
+		{
+			MagRoot->SetRelativeLocation(FVector::ZeroVector);
+			MagRoot->SetRelativeScale3D(FVector::OneVector);
+		}
+	}
+	if (FirstPersonMagGlow)
+	{
+		FirstPersonMagGlow->SetScalarParameterValue(TEXT("EmissiveStrength"), 3.5f);
+	}
+	if (ThirdPersonMagGlow)
+	{
+		ThirdPersonMagGlow->SetScalarParameterValue(TEXT("EmissiveStrength"), 12.f);
+	}
+}
+
+void AShoterWeapon::OnMagazineReleased()
+{
+	PlayReloadSound(Stats.MagOutSound, 0.9f);
+
+	UShoterFXPool* Pool = UShoterFXPool::Get(this);
+	if (!Pool || !OwningCharacter)
+	{
+		return;
+	}
+
+	const FShoterReloadSpec& R = Stats.Reload;
+	const bool bFirstPerson = IsFirstPersonView();
+	const USceneComponent* Root = bFirstPerson ? FirstPersonRoot.Get() : ThirdPersonRoot.Get();
+	if (!Root)
+	{
+		return;
+	}
+	const FTransform ModelTransform = Root->GetComponentTransform();
+	const FVector MagDirection = R.MagOut.GetSafeNormal();
+	const FVector LocalPosition = R.MagCenter + MagDirection * R.MagTravel;
+
+	FShoterDebrisParams Debris;
+	Debris.Shape = EShoterShape::Cube;
+	Debris.Size = R.MagSize * FMath::Max(ModelTransform.GetScale3D().X, 0.1f);
+	Debris.BaseColor = Stats.AccentColor.GetLuminance() > 0.2f ? Stats.AccentColor * 0.6f : FLinearColor(0.06f, 0.065f, 0.075f);
+	Debris.Metallic = 0.8f;
+	Debris.Roughness = 0.4f;
+	Debris.GlowColor = Stats.EnergyColor;
+	Debris.GlowStrength = bFirstPerson ? 1.6f : 8.f;
+	Debris.GlowTime = bFirstPerson ? 0.5f : 0.55f;
+	Debris.Location = ModelTransform.TransformPosition(LocalPosition);
+	Debris.Rotation = ModelTransform.TransformRotation(R.MagRotation.Quaternion()).Rotator();
+	const FVector Velocity = ModelTransform.TransformVectorNoScale(MagDirection * 35.f + FVector(-15.f, -40.f, -20.f))
+		+ OwningCharacter->GetVelocity().GetClampedToMaxSize(500.f) * 0.5f;
+	Debris.Velocity = Velocity;
+	Debris.AngularVelocity = FVector(FMath::FRandRange(-260.f, 260.f), FMath::FRandRange(-200.f, 200.f), FMath::FRandRange(-180.f, 180.f));
+	Debris.bFirstPerson = bFirstPerson;
+	if (bFirstPerson)
+	{
+		// Falls out of the picture within a fraction of a second; no world collision needed.
+		Debris.GravityZ = -260.f;
+		Debris.Lifetime = 1.3f;
+		Debris.FadeTime = 0.3f;
+		Debris.bCollide = false;
+	}
+	else
+	{
+		Debris.Lifetime = 3.f;
+		Debris.FadeTime = 0.6f;
+		Debris.bCollide = true;
+		Debris.MaxBounces = 2;
+		Debris.BounceSound = TEXT("Grenade_Bounce");
+		Debris.BounceSoundPitch = 1.3f;
+	}
+	Pool->SpawnDebris(Debris);
+}
+
+void AShoterWeapon::OnMagazineSeated()
+{
+	PlayReloadSound(Stats.MagInSound, 1.f);
+	if (IsFirstPersonView())
+	{
+		// A small bump of the whole gun as the cell locks in.
+		AddViewKick(FVector(-1.1f, 0.f, -0.9f), FRotator(2.6f, 0.f, 0.f));
+	}
+}
+
+void AShoterWeapon::OnActionRacked()
+{
+	PlayReloadSound(Stats.ChargeSound, 0.9f);
+	if (IsFirstPersonView())
+	{
+		AddViewKick(FVector(-0.8f, 0.f, 0.f), FRotator(1.2f, 0.f, 0.f));
+	}
 }
 
 void AShoterWeapon::AddReserveAmmo(int32 Amount)

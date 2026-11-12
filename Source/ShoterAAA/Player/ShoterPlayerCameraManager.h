@@ -15,6 +15,12 @@ public:
 
 	virtual void UpdateViewTarget(FTViewTarget& OutVT, float DeltaTime) override;
 
+	/** Converts a horizontal FOV authored for 16:9 into the horizontal FOV for the given aspect (Hor+, never narrower). */
+	static float ConvertHorPlusFOV(float ReferenceFOVDegrees, float Aspect);
+
+	/** Width / height of the owning player's viewport (16:9 if unknown). */
+	float GetViewportAspect() const;
+
 	/** Adds camera shake (0..1, accumulates and decays). */
 	void AddTrauma(float Amount);
 

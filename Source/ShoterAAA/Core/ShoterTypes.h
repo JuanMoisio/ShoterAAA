@@ -142,9 +142,9 @@ struct SHOTERAAA_API FShoterUserSettings
 	UPROPERTY(BlueprintReadWrite)
 	float MouseSensitivity = 1.0f;
 
-	/** Extra sensitivity multiplier while aiming down sights (0.2 - 1.5). */
+	/** Aim sensitivity relative to the zoom (1.0 = same screen-space speed as the hip view; 0.2 - 1.5). */
 	UPROPERTY(BlueprintReadWrite)
-	float AimSensitivityScale = 0.7f;
+	float AimSensitivityScale = 1.0f;
 
 	UPROPERTY(BlueprintReadWrite)
 	bool bInvertY = false;

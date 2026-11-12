@@ -34,8 +34,11 @@ public:
 	/** Re-applies the saved user settings (FOV, volume, graphics). Called on BeginPlay and from the options menu. */
 	void ApplyUserSettings();
 
-	/** Degrees of rotation per mouse count, including the user sensitivity. */
-	float GetMouseLookScale(bool bAiming) const;
+	/**
+	 * Degrees of rotation per mouse count, including the user sensitivity. EasedAimAlpha (0..1) blends continuously
+	 * to the zoom-scaled aim sensitivity; WeaponAimFOV is the weapon's 16:9 reference aim FOV.
+	 */
+	float GetMouseLookScale(float EasedAimAlpha, float WeaponAimFOV) const;
 	bool IsLookInverted() const;
 	float GetUserFieldOfView() const;
 

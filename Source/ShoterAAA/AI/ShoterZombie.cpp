@@ -299,6 +299,62 @@ void AShoterZombie::ApplyLook()
 		return;
 	}
 
+	if (MeshComp->GetSkeletalMeshAsset())
+	{
+		// Corrupted android: the mesh's own materials (detail kept) tinted dark and sickly, glowing logo and rim in the type colour.
+		ShoterCharacterKit::MakeArmorSlotMaterials(this, MeshComp, BodySlotMaterials);
+		for (UMaterialInstanceDynamic* SlotInstance : BodySlotMaterials)
+		{
+			if (SlotInstance)
+			{
+				SlotInstance->SetVectorParameterValue(TEXT("ArmorColor"), Look.Skin * 0.1f);
+				SlotInstance->SetVectorParameterValue(TEXT("PanelColor"), Look.Skin * 0.3f);
+				SlotInstance->SetScalarParameterValue(TEXT("Metallic"), 0.9f);
+				SlotInstance->SetScalarParameterValue(TEXT("RoughnessScale"), 0.8f);
+			}
+		}
+		if (!RimOverlayMaterial)
+		{
+			if (UMaterialInterface* RimMaterial = Assets->GetMaterial(TEXT("M_Shoter_TeamRim")))
+			{
+				RimOverlayMaterial = UMaterialInstanceDynamic::Create(RimMaterial, this);
+				MeshComp->SetOverlayMaterial(RimOverlayMaterial);
+			}
+		}
+		if (RimOverlayMaterial)
+		{
+			RimOverlayMaterial->SetVectorParameterValue(TEXT("TeamColor"), Look.Rim);
+			RimOverlayMaterial->SetScalarParameterValue(TEXT("RimStrength"), 0.12f);
+		}
+
+		const int32 TypeIndex = static_cast<int32>(ZombieType);
+		if (KitBuiltForType != TypeIndex)
+		{
+			for (FShoterKitPart& Part : KitParts)
+			{
+				if (Part.Component)
+				{
+					Part.Component->DestroyComponent();
+				}
+			}
+			KitParts.Reset();
+			KitBuiltForType = TypeIndex;
+		}
+		if (KitParts.Num() == 0)
+		{
+			ShoterCharacterKit::Build(this, MeshComp, ShoterCharacterKit::GetZombieKit(TypeIndex == static_cast<int32>(EShoterZombieType::Brute) ? 2 : 0), false, KitParts);
+		}
+		FShoterKitPalette Palette;
+		Palette.Armor = Look.Skin * 0.25f;
+		Palette.Trim = Look.Skin * 0.5f;
+		Palette.ArmorMetallic = 0.35f;
+		Palette.ArmorRoughness = 0.7f;
+		Palette.AccentColor = Look.Rim;
+		Palette.GlowIntensity = 4.5f;
+		ShoterCharacterKit::UpdateMaterials(this, Palette, KitMaterials, KitParts);
+		return;
+	}
+
 	BodyMaterial = Assets->MakeSurfaceMaterial(this, Look.Skin, 0.05f, 0.8f, Look.Rim, Look.RimStrength);
 	if (BodyMaterial)
 	{
